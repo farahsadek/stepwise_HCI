@@ -9,6 +9,26 @@ import {
 } from "react";
 import { ActivityHistoryPage, RecentActivity, RoleActivity, logActivity } from "./activity";
 import { AccessibilityToolbar, requestReadAloud } from "./accessibility";
+import { Button, Icon, Status, type IconName } from "./ui";
+import { newId, updateClassState, useClassState } from "./store";
+import {
+  AssessmentsPage,
+  ClassPicker,
+  Gradebook,
+  MessagesPage,
+  NoteComposer,
+  QuestionReview,
+  QuizMonitor,
+  ResourcesPanel,
+  RosterPage,
+  SkillTree,
+  StudentRecord,
+  TeacherProfile,
+  TodayPanel,
+  GradeBreakdown,
+  sendPracticeReminder,
+  type KhadijaLive,
+} from "./teacher";
 import { CameraCapture, ExplainerVideo, analyzePage, type PageQuality } from "./student-media";
 
 type Role = "student" | "teacher" | "parent";
@@ -19,15 +39,28 @@ type StudentView =
   | "upload"
   | "notifications"
   | "progress"
-  | "profile";
+  | "profile"
+  | "messages";
 type PracticePhase = "lesson" | "quiz" | "result";
 type HelpRequest = { mode: "ask" | "report"; question: number };
-type TeacherView = "overview" | "review" | "insights" | "activity";
+type TeacherView =
+  | "overview"
+  | "review"
+  | "insights"
+  | "activity"
+  | "students"
+  | "student"
+  | "assessments"
+  | "byquestion"
+  | "gradebook"
+  | "skilltree"
+  | "messages"
+  | "profile";
 type ReviewStage = "ocr" | "grade" | "redflag" | "publish";
 type ReviewStudent = "Khadija" | "Mariam" | "Salma";
 type ToastState = { message: string; actionLabel?: string; onAction?: () => void };
 type Language = "EN" | "DE";
-type NotificationTarget = "feedback" | "practice" | "review" | "insights" | "summary";
+import type { NotificationTarget } from "./store";
 type AppNotification = {
   id: number;
   role: Role;
@@ -47,36 +80,6 @@ type AddNotification = (
   target: NotificationTarget,
 ) => void;
 let nextNotificationId = 1;
-type IconName =
-  | "arrow"
-  | "bell"
-  | "book"
-  | "check"
-  | "chevron"
-  | "clock"
-  | "close"
-  | "edit"
-  | "eye"
-  | "family"
-  | "flag"
-  | "grid"
-  | "home"
-  | "idea"
-  | "language"
-  | "lock"
-  | "logout"
-  | "menu"
-  | "message"
-  | "person"
-  | "play"
-  | "review"
-  | "school"
-  | "spark"
-  | "speaker"
-  | "star"
-  | "trend"
-  | "warning";
-
 const germanCopy: Record<string, string> = {
   Notifications: "Benachrichtigungen",
   Unread: "Ungelesen",
@@ -339,6 +342,28 @@ const germanCopy: Record<string, string> = {
   Close: "Schließen",
   "Quiz status": "Quiz-Status",
   "Progress staircase": "Fortschrittstreppe",
+  "Award 0 of 3 marks": "0 von 3 Punkten vergeben",
+  "Correct the flagged answer": "Markierte Antwort korrigieren",
+  Suggestions: "Vorschläge",
+  "As read by AI": "Wie von der KI gelesen",
+  "Suggested correction": "Vorgeschlagene Korrektur",
+  "Often confused in handwriting: 2 and 7, 1 and 7, 4 and 9. Press Enter to verify and go to the next flagged item.":
+    "Häufig verwechselt in Handschrift: 2 und 7, 1 und 7, 4 und 9. Mit Enter prüfen und zur nächsten Markierung wechseln.",
+  Low: "Niedrig",
+  "Carrying error": "Übertragsfehler",
+  Improving: "Verbessert sich",
+  "Same carrying mistake in two quizzes.": "Gleicher Übertragsfehler in zwei Quizzen.",
+  "Improving after practice; pop quiz passed.": "Besser nach der Übung; Kurz-Quiz bestanden.",
+  "Open record": "Akte öffnen",
+  "Send note": "Notiz senden",
+  "Send reminder": "Erinnerung senden",
+  Students: "Kinder",
+  Assessments: "Prüfungen",
+  "Review by question": "Nach Aufgabe prüfen",
+  Gradebook: "Notenbuch",
+  "Skill tree": "Kompetenzbaum",
+  Messages: "Nachrichten",
+  "Profile and settings": "Profil und Einstellungen",
 };
 
 function translateText(text: string, language: Language) {
@@ -362,6 +387,11 @@ function translateText(text: string, language: Language) {
   const answerSaved = core.match(/^The flagged answer is saved as (.+)\.$/);
   if (answerSaved)
     return `${leading}Die markierte Antwort wurde als ${answerSaved[1]} gespeichert.${trailing}`;
+  const answerMismatch = core.match(/^The answer (.+) does not match the expected result 528\.$/);
+  if (answerMismatch)
+    return `${leading}Die Antwort ${answerMismatch[1]} entspricht nicht dem erwarteten Ergebnis 528.${trailing}`;
+  const practiceDone = core.match(/^Practice done; pop quiz (\d)\/3$/);
+  if (practiceDone) return `${leading}Übung erledigt; Kurz-Quiz ${practiceDone[1]}/3${trailing}`;
   const pinDigits = core.match(/^(\d) of 4 PIN digits entered$/);
   if (pinDigits) return `${leading}${pinDigits[1]} von 4 PIN-Ziffern eingegeben${trailing}`;
   const noteOpened = core.match(/^Check-in note opened for (.+)\.$/);
@@ -391,156 +421,6 @@ function Localize({ language, children }: { language: Language; children: ReactN
     return cloneElement(element, localizedProps, walk(props.children));
   };
   return <>{walk(children)}</>;
-}
-
-const paths: Record<IconName, ReactNode> = {
-  arrow: (
-    <>
-      <path d="M5 12h14M13 6l6 6-6 6" />
-    </>
-  ),
-  bell: (
-    <>
-      <path d="M6 9a6 6 0 0112 0c0 7 3 7 3 9H3c0-2 3-2 3-9Z" />
-      <path d="M9.5 21h5" />
-    </>
-  ),
-  book: (
-    <>
-      <path d="M4 5.5A3.5 3.5 0 017.5 2H20v16H7.5A3.5 3.5 0 004 21.5z" />
-      <path d="M4 5.5v16M8 6h8M8 10h8" />
-    </>
-  ),
-  check: <path d="M5 12.5l4.2 4.2L19 7" />,
-  chevron: <path d="M9 6l6 6-6 6" />,
-  clock: (
-    <>
-      <circle cx="12" cy="12" r="9" />
-      <path d="M12 7v5l3 2" />
-    </>
-  ),
-  close: <path d="M6 6l12 12M18 6L6 18" />,
-  edit: (
-    <>
-      <path d="M4 20l4.2-1 10.6-10.6-3.2-3.2L5 15.8zM13.8 7l3.2 3.2" />
-    </>
-  ),
-  eye: (
-    <>
-      <path d="M2.5 12s3.5-6 9.5-6 9.5 6 9.5 6-3.5 6-9.5 6-9.5-6-9.5-6z" />
-      <circle cx="12" cy="12" r="2.5" />
-    </>
-  ),
-  family: (
-    <>
-      <circle cx="8" cy="8" r="3" />
-      <circle cx="17" cy="9" r="2.5" />
-      <path d="M2.5 20c.4-4 2.2-6 5.5-6s5.1 2 5.5 6M14 15c3.8-.7 6.2 1.1 6.5 5" />
-    </>
-  ),
-  flag: (
-    <>
-      <path d="M5 21V4M5 5h11l-2 4 2 4H5" />
-    </>
-  ),
-  grid: (
-    <>
-      <rect x="3" y="3" width="7" height="7" rx="1" />
-      <rect x="14" y="3" width="7" height="7" rx="1" />
-      <rect x="3" y="14" width="7" height="7" rx="1" />
-      <rect x="14" y="14" width="7" height="7" rx="1" />
-    </>
-  ),
-  home: (
-    <>
-      <path d="M3 11l9-8 9 8" />
-      <path d="M5 10v11h14V10M9 21v-7h6v7" />
-    </>
-  ),
-  idea: (
-    <>
-      <path d="M9 18h6M10 22h4" />
-      <path d="M8.5 15.5A7 7 0 1116 15c-.9.7-1 1.6-1 3H9c0-1.2-.1-1.9-.5-2.5z" />
-    </>
-  ),
-  language: (
-    <>
-      <circle cx="12" cy="12" r="9" />
-      <path d="M3.5 9h17M3.5 15h17M12 3c2.5 2.4 3.5 5.4 3.5 9s-1 6.6-3.5 9c-2.5-2.4-3.5-5.4-3.5-9S9.5 5.4 12 3z" />
-    </>
-  ),
-  lock: (
-    <>
-      <rect x="5" y="10" width="14" height="11" rx="2" />
-      <path d="M8 10V7a4 4 0 018 0v3" />
-    </>
-  ),
-  logout: (
-    <>
-      <path d="M10 4H4v16h6M14 8l4 4-4 4M8 12h10" />
-    </>
-  ),
-  menu: <path d="M4 7h16M4 12h16M4 17h16" />,
-  message: <path d="M4 4h16v12H9l-5 4z" />,
-  person: (
-    <>
-      <circle cx="12" cy="8" r="4" />
-      <path d="M4 21c.7-5 3.3-7 8-7s7.3 2 8 7" />
-    </>
-  ),
-  play: <path d="M9 6l9 6-9 6z" />,
-  review: (
-    <>
-      <path d="M7 3h10v4H7zM5 5H3v17h18V5h-2" />
-      <path d="M8 12l2.3 2.3L16 9" />
-    </>
-  ),
-  school: (
-    <>
-      <path d="M3 10l9-6 9 6-9 5zM6 12v5c3.5 2.5 8.5 2.5 12 0v-5M21 10v7" />
-    </>
-  ),
-  spark: (
-    <>
-      <path d="M12 2l1.4 5.6L19 9l-5.6 1.4L12 16l-1.4-5.6L5 9l5.6-1.4zM19 15l.7 2.3L22 18l-2.3.7L19 21l-.7-2.3L16 18l2.3-.7z" />
-    </>
-  ),
-  speaker: (
-    <>
-      <path d="M4 10v4h4l5 4V6l-5 4zM16 9c1.5 1.7 1.5 4.3 0 6M19 6c3 3.4 3 8.6 0 12" />
-    </>
-  ),
-  star: <path d="M12 3l2.8 5.7 6.2.9-4.5 4.4 1 6.2-5.5-2.9-5.5 2.9 1-6.2L3 9.6l6.2-.9z" />,
-  trend: (
-    <>
-      <path d="M4 19V9M10 19V5M16 19v-7M22 19H2" />
-      <path d="M4 6l5-3 6 5 6-5" />
-    </>
-  ),
-  warning: (
-    <>
-      <path d="M12 3L2.5 20h19z" />
-      <path d="M12 9v4M12 17h.01" />
-    </>
-  ),
-};
-
-function Icon({ name, size = 20 }: { name: IconName; size?: number }) {
-  return (
-    <svg
-      width={size}
-      height={size}
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.9"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-    >
-      {paths[name]}
-    </svg>
-  );
 }
 
 function Logo({ compact = false }: { compact?: boolean }) {
@@ -687,46 +567,6 @@ function PencilPal({ className = "" }: { className?: string }) {
         strokeLinejoin="round"
       />
     </svg>
-  );
-}
-
-function Button({
-  children,
-  icon,
-  variant = "primary",
-  onClick,
-  className = "",
-  disabled = false,
-}: {
-  children: ReactNode;
-  icon: IconName;
-  variant?: "primary" | "secondary" | "ghost" | "danger";
-  onClick?: () => void;
-  className?: string;
-  disabled?: boolean;
-}) {
-  return (
-    <button className={`button ${variant} ${className}`} onClick={onClick} disabled={disabled}>
-      <Icon name={icon} />
-      {children}
-    </button>
-  );
-}
-
-function Status({
-  type,
-  children,
-}: {
-  type: "good" | "warn" | "bad" | "neutral";
-  children: ReactNode;
-}) {
-  const icon =
-    type === "good" ? "check" : type === "warn" ? "warning" : type === "bad" ? "idea" : "clock";
-  return (
-    <span className={`status ${type}`}>
-      <Icon name={icon} size={16} />
-      {children}
-    </span>
   );
 }
 
@@ -1333,6 +1173,26 @@ function StudentApp({
       "Mache die unteren Zahlen gleich: 2/3 = 10/15 und 3/5 = 9/15. 10 ist mehr als 9, also ist 2/3 größer.",
     ),
   };
+  const classState = useClassState();
+  const myThreads = classState.threads.filter((thread) => thread.student === "Khadija");
+  const addThread = (kind: "question" | "report", q: number, text: string) =>
+    updateClassState((current) => ({
+      threads: [
+        {
+          id: newId(),
+          student: "Khadija",
+          kind,
+          question: q,
+          title:
+            kind === "question"
+              ? { EN: `Question about Q${q}`, DE: `Frage zu Aufgabe ${q}` }
+              : { EN: `Possible error in Q${q}`, DE: `Möglicher Fehler in Aufgabe ${q}` },
+          messages: [{ from: "student", text, at: Date.now() }],
+          status: "open",
+        },
+        ...current.threads,
+      ],
+    }));
   const sendHelpRequest = () => {
     if (!helpRequest) return;
     const q = helpRequest.question;
@@ -1349,9 +1209,10 @@ function StudentApp({
           EN: `Khadija asked about Quiz 4, question ${q}.${note ? ` “${note}”` : ""}`,
           DE: `Khadija hat eine Frage zu Quiz 4, Aufgabe ${q}.${note ? ` „${note}“` : ""}`,
         },
-        { EN: "Open review", DE: "Prüfung öffnen" },
-        "review",
+        { EN: "Open message", DE: "Nachricht öffnen" },
+        "messages",
       );
+      addThread("question", q, note);
       notify(t("Your question was sent to Ms. Ashraf.", "Deine Frage wurde an Frau Ashraf gesendet."));
     } else {
       const reason =
@@ -1369,9 +1230,10 @@ function StudentApp({
           EN: `Quiz 4, question ${q}: ${reason.EN}.${note ? ` “${note}”` : ""}`,
           DE: `Quiz 4, Aufgabe ${q}: ${reason.DE}.${note ? ` „${note}“` : ""}`,
         },
-        { EN: "Open review", DE: "Prüfung öffnen" },
-        "review",
+        { EN: "Open message", DE: "Nachricht öffnen" },
+        "messages",
       );
+      addThread("report", q, `${de ? reason.DE : reason.EN}${note ? ` – ${note}` : ""}`);
       notify(
         t(
           "Thank you! Ms. Ashraf will check it again.",
@@ -1479,6 +1341,7 @@ function StudentApp({
     if (navigationRequest?.role !== "student") return;
     if (navigationRequest.target === "feedback") setView("feedback");
     if (navigationRequest.target === "practice") startPractice();
+    if (navigationRequest.target === "messages") setView("messages");
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [navigationRequest]);
 
@@ -1641,9 +1504,15 @@ function StudentApp({
                   </button>
                 ))
               )}
-              <Button icon="bell" variant="ghost" onClick={onNotifications}>
-                {t("See all updates", "Alle Neuigkeiten ansehen")}
-              </Button>
+              <div className="lesson-actions home-update-actions">
+                <Button icon="bell" variant="ghost" onClick={onNotifications}>
+                  {t("See all updates", "Alle Neuigkeiten ansehen")}
+                </Button>
+                <Button icon="message" variant="ghost" onClick={() => setView("messages")}>
+                  {t("My messages", "Meine Nachrichten")}
+                  {myThreads.length ? ` (${myThreads.length})` : ""}
+                </Button>
+              </div>
             </article>
           </>
         )}
@@ -1859,7 +1728,7 @@ function StudentApp({
               <Status type="good">{t("Chosen by Ms. Ashraf", "Von Frau Ashraf ausgewählt")}</Status>
             </div>
             <article className="practice-card card lesson-card">
-              <ExplainerVideo language={language} />
+              {classState.resources.video && <ExplainerVideo language={language} />}
               <ol className="lesson-steps">
                 <li>
                   {t(
@@ -1892,20 +1761,29 @@ function StudentApp({
                 >
                   {t("Start the quiz", "Quiz starten")}
                 </Button>
-                <Button
-                  icon="book"
-                  variant="secondary"
-                  onClick={() =>
-                    notify(
-                      t(
-                        "Worksheet ready to print (demo only).",
-                        "Arbeitsblatt zum Drucken bereit (nur Demo).",
-                      ),
-                    )
-                  }
-                >
-                  {t("Print worksheet", "Arbeitsblatt drucken")}
-                </Button>
+                {classState.resources.printable !== "none" && (
+                  <Button
+                    icon="book"
+                    variant="secondary"
+                    onClick={() =>
+                      notify(
+                        classState.resources.printable === "game"
+                          ? t(
+                              "Fraction strips game ready to print (demo only).",
+                              "Bruchstreifen-Spiel zum Drucken bereit (nur Demo).",
+                            )
+                          : t(
+                              "Worksheet ready to print (demo only).",
+                              "Arbeitsblatt zum Drucken bereit (nur Demo).",
+                            ),
+                      )
+                    }
+                  >
+                    {classState.resources.printable === "game"
+                      ? t("Print fraction strips game", "Bruchstreifen-Spiel drucken")
+                      : t("Print worksheet", "Arbeitsblatt drucken")}
+                  </Button>
+                )}
               </div>
             </article>
           </section>
@@ -2442,6 +2320,55 @@ function StudentApp({
           </section>
         )}
 
+        {view === "messages" && (
+          <section>
+            <div className="page-heading">
+              <div>
+                <button className="back-link" onClick={() => setView("home")}>
+                  <Icon name="arrow" /> {t("Back home", "Zurück zum Start")}
+                </button>
+                <p className="kicker">{t("MESSAGES", "NACHRICHTEN")}</p>
+                <h1>{t("Messages with Ms. Ashraf", "Nachrichten mit Frau Ashraf")}</h1>
+              </div>
+            </div>
+            {myThreads.length === 0 ? (
+              <article className="card student-thread">
+                <p>
+                  {t(
+                    "No messages yet. On your feedback page you can ask Ms. Ashraf about any question.",
+                    "Noch keine Nachrichten. Auf deiner Feedback-Seite kannst du Frau Ashraf zu jeder Aufgabe fragen.",
+                  )}
+                </p>
+              </article>
+            ) : (
+              myThreads.map((thread) => (
+                <article className="card student-thread" key={thread.id}>
+                  <div className="section-title">
+                    <h2>{thread.title[language]}</h2>
+                    <Status type={thread.status === "open" ? "warn" : "good"}>
+                      {thread.kind === "note"
+                        ? t("Note from your teacher", "Notiz von deiner Lehrerin")
+                        : thread.status === "open"
+                          ? t("Waiting for Ms. Ashraf", "Wartet auf Frau Ashraf")
+                          : thread.status === "resolved"
+                            ? t("Checked by Ms. Ashraf", "Von Frau Ashraf geprüft")
+                            : t("Ms. Ashraf answered", "Frau Ashraf hat geantwortet")}
+                    </Status>
+                  </div>
+                  {thread.messages.map((message, index) => (
+                    <p className={`bubble ${message.from}`} key={index} data-free-text>
+                      <small>
+                        {message.from === "teacher" ? t("Ms. Ashraf", "Frau Ashraf") : t("You", "Du")}
+                      </small>
+                      {message.text}
+                    </p>
+                  ))}
+                </article>
+              ))
+            )}
+          </section>
+        )}
+
         {view === "profile" && (
           <section>
             <div className="page-heading">
@@ -2567,17 +2494,25 @@ function TeacherSidebar({
   view,
   setView,
   reviewCount,
+  messageCount,
   language,
 }: {
   view: TeacherView;
   setView: (v: TeacherView) => void;
   reviewCount: number;
+  messageCount: number;
   language: Language;
 }) {
   const items: { id: TeacherView; icon: IconName; label: string; count?: number }[] = [
     { id: "overview", icon: "grid", label: "Overview" },
     { id: "review", icon: "review", label: "Review queue", count: reviewCount },
+    { id: "students", icon: "person", label: "Students" },
+    { id: "assessments", icon: "book", label: "Assessments" },
+    { id: "byquestion", icon: "check", label: "Review by question" },
+    { id: "gradebook", icon: "grid", label: "Gradebook" },
+    { id: "skilltree", icon: "spark", label: "Skill tree" },
     { id: "insights", icon: "trend", label: "Class insights" },
+    { id: "messages", icon: "message", label: "Messages", count: messageCount },
     { id: "activity", icon: "clock", label: "Activity history" },
   ];
   return (
@@ -2588,12 +2523,12 @@ function TeacherSidebar({
           {items.map((item) => (
             <button
               key={item.id}
-              className={view === item.id ? "active" : ""}
+              className={view === item.id || (item.id === "students" && view === "student") ? "active" : ""}
               onClick={() => setView(item.id)}
             >
               <Icon name={item.icon} />
               {item.label}
-              {item.count && <b>{item.count}</b>}
+              {item.count ? <b>{item.count}</b> : null}
             </button>
           ))}
         </nav>
@@ -2697,6 +2632,8 @@ function TeacherApp({
   onNotifications,
   addNotification,
   navigationRequest,
+  practiced,
+  practiceScore,
 }: {
   awardedMark: number | null;
   setAwardedMark: (v: number | null) => void;
@@ -2723,6 +2660,8 @@ function TeacherApp({
   onNotifications: () => void;
   addNotification: AddNotification;
   navigationRequest: NavigationRequest;
+  practiced: boolean;
+  practiceScore: number | null;
 }) {
   const [view, setView] = useState<TeacherView>("overview");
   const [stage, setStage] = useState<ReviewStage>("ocr");
@@ -2731,8 +2670,15 @@ function TeacherApp({
   const [drawer, setDrawer] = useState(false);
   const [overrideAnswer, setOverrideAnswer] = useState(studentAnswer);
   const [overrideMark, setOverrideMark] = useState(3);
-  const [otherReviewed, setOtherReviewed] = useState<ReviewStudent[]>([]);
-  const [verifiedStudents, setVerifiedStudents] = useState<ReviewStudent[]>([]);
+  const classState = useClassState();
+  const otherReviewed = classState.otherReviewed as ReviewStudent[];
+  const setOtherReviewed = (next: ReviewStudent[]) => updateClassState({ otherReviewed: next });
+  const verifiedStudents = classState.verifiedStudents as ReviewStudent[];
+  const setVerifiedStudents = (next: ReviewStudent[]) =>
+    updateClassState({ verifiedStudents: next });
+  const [recordName, setRecordName] = useState("Khadija");
+  const [noteFor, setNoteFor] = useState<string | null>(null);
+  const [ocrDraft, setOcrDraft] = useState<Record<string, string>>({});
   const [otherFeedback, setOtherFeedback] = useState<Record<"Mariam" | "Salma", string>>({
     Mariam: "Show each step so your reasoning is clear.",
     Salma: "Use a fraction model before choosing the comparison sign.",
@@ -2748,8 +2694,41 @@ function TeacherApp({
   const selectedOcrVerified =
     selectedStudent === "Khadija" ? ocrVerified : verifiedStudents.includes(selectedStudent);
   const supportPlanActive = published && redFlagDecision === "confirmed";
-  const attention = [
+  const practicePending = supportPlanActive && !practiced;
+  // AI proposal for Q2 follows the text the teacher verified (528 is the expected answer).
+  const aiQ2 = studentAnswer.trim() === "528" ? 3 : 0;
+  const khadijaLive: KhadijaLive = {
+    ocrVerified,
+    awardedMark,
+    published,
+    redFlagDecision,
+    practiced,
+    practiceScore,
+    percent,
+  };
+  const common = {
+    language,
+    notify: (message: string) => notify(message),
+    addNotification,
+  };
+  const openRecord = (name: string) => {
+    setRecordName(name);
+    setView("student");
+  };
+  type AttentionItem = {
+    student: string;
+    initials: string;
+    urgency: string;
+    flag: string;
+    confidence: string;
+    why: string;
+    priority: number;
+    reviewable: boolean;
+  };
+  const attention = (
+    [
     {
+      reviewable: true,
       student: "Khadija" as ReviewStudent,
       initials: "KA",
       urgency: supportPlanActive ? "Support plan" : "High",
@@ -2762,11 +2741,14 @@ function TeacherApp({
             : "OCR mismatch",
       confidence: "61%",
       why: supportPlanActive
-        ? "Fraction-comparison error confirmed; practice assigned"
+        ? practiced
+          ? `Practice done; pop quiz ${practiceScore}/3`
+          : "Fraction-comparison error confirmed; practice assigned"
         : "Low OCR confidence changes 3 marks.",
       priority: supportPlanActive ? 10 : 0,
     },
     {
+      reviewable: true,
       student: "Salma" as ReviewStudent,
       initials: "SN",
       urgency: "High",
@@ -2776,6 +2758,7 @@ function TeacherApp({
       priority: otherReviewed.includes("Salma") ? 30 : 1,
     },
     {
+      reviewable: true,
       student: "Mariam" as ReviewStudent,
       initials: "MS",
       urgency: "Medium",
@@ -2784,7 +2767,28 @@ function TeacherApp({
       why: "AI proposes partial credit for reasoning.",
       priority: otherReviewed.includes("Mariam") ? 31 : 2,
     },
-  ]
+    {
+      reviewable: false,
+      student: "Laila",
+      initials: "LA",
+      urgency: "Medium",
+      flag: "Carrying error",
+      confidence: "88%",
+      why: "Same carrying mistake in two quizzes.",
+      priority: 5,
+    },
+    {
+      reviewable: false,
+      student: "Nour",
+      initials: "NO",
+      urgency: "Low",
+      flag: "Improving",
+      confidence: "93%",
+      why: "Improving after practice; pop quiz passed.",
+      priority: 40,
+    },
+    ] as AttentionItem[]
+  )
     .sort((a, b) => a.priority - b.priority)
     .map((item, index) => ({ ...item, rank: index + 1 }));
   const openReview = (student: ReviewStudent, nextStage: ReviewStage = "ocr") => {
@@ -2798,15 +2802,16 @@ function TeacherApp({
       setAwardedMark(mark);
       setDismissed(false);
       setPublished(false);
-      if (mark === 3 && answer === "528") {
+      const proposal = answer.trim() === "528" ? 3 : 0;
+      if (mark === proposal && answer === studentAnswer) {
         logActivity("mark", "Khadija", {
-          EN: "Quiz 4 · Q2: AI mark 3/3 confirmed",
-          DE: "Quiz 4 · A2: KI-Bewertung 3/3 bestätigt",
+          EN: `Quiz 4 · Q2: AI mark ${mark}/3 confirmed`,
+          DE: `Quiz 4 · A2: KI-Bewertung ${mark}/3 bestätigt`,
         });
       } else {
         logActivity("override", "Khadija", {
-          EN: `Quiz 4 · Q2: AI proposed 3/3, teacher awarded ${mark}/3 (answer ${answer})`,
-          DE: `Quiz 4 · A2: KI schlug 3/3 vor, Lehrerin vergab ${mark}/3 (Antwort ${answer})`,
+          EN: `Quiz 4 · Q2: AI proposed ${aiQ2}/3, teacher awarded ${mark}/3 (answer ${answer})`,
+          DE: `Quiz 4 · A2: KI schlug ${aiQ2}/3 vor, Lehrerin vergab ${mark}/3 (Antwort ${answer})`,
         });
       }
       notify(`Khadija’s answer saved as ${answer}; ${mark}/3 awarded.`);
@@ -2878,6 +2883,41 @@ function TeacherApp({
             confidence: "52%",
           };
 
+  const ocrReadAs = selectedStudent === "Khadija" ? "578" : selectedEvidence.extracted;
+  const savedOcr =
+    selectedStudent === "Khadija"
+      ? studentAnswer
+      : (classState.ocrValues[selectedStudent] ?? selectedEvidence.corrected);
+  const ocrValue =
+    ocrDraft[selectedStudent] ?? (selectedOcrVerified ? savedOcr : selectedEvidence.extracted);
+  const verifyOcr = (goNext: boolean) => {
+    const value = ocrValue.trim();
+    if (!value) return;
+    if (selectedStudent === "Khadija") {
+      setOcrVerified(true);
+      if (value !== studentAnswer) setAwardedMark(null);
+      setStudentAnswer(value);
+    } else {
+      setVerifiedStudents([...new Set([...verifiedStudents, selectedStudent])]);
+      updateClassState((current) => ({
+        ocrValues: { ...current.ocrValues, [selectedStudent]: value },
+      }));
+    }
+    if (value !== savedOcr || !selectedOcrVerified)
+      logActivity("ocr", selectedStudent, {
+        EN:
+          value === ocrReadAs
+            ? `Quiz 4 · ${selectedEvidence.question}: OCR reading ${ocrReadAs} confirmed`
+            : `Quiz 4 · ${selectedEvidence.question}: OCR ${ocrReadAs} corrected to ${value}`,
+        DE:
+          value === ocrReadAs
+            ? `Quiz 4 · ${selectedEvidence.question}: OCR-Lesung ${ocrReadAs} bestätigt`
+            : `Quiz 4 · ${selectedEvidence.question}: OCR ${ocrReadAs} korrigiert zu ${value}`,
+      });
+    if (goNext) setStage("grade");
+    else notify(`OCR verified for ${selectedStudent}.`);
+  };
+
   useEffect(() => {
     if (navigationRequest?.role !== "teacher") return;
     if (navigationRequest.target === "review") {
@@ -2886,6 +2926,7 @@ function TeacherApp({
       setView("review");
     }
     if (navigationRequest.target === "insights") setView("insights");
+    if (navigationRequest.target === "messages") setView("messages");
   }, [navigationRequest]);
 
   return (
@@ -2895,6 +2936,7 @@ function TeacherApp({
           view={view}
           setView={setView}
           reviewCount={reviewCount}
+          messageCount={classState.threads.filter((item) => item.status === "open").length}
           language={language}
         />
         <div className="teacher-content">
@@ -2905,6 +2947,7 @@ function TeacherApp({
             onExit={onExit}
             unreadCount={unreadCount}
             onNotifications={onNotifications}
+            onProfile={() => setView("profile")}
           />
           <main className="teacher-main">
             {view === "overview" && (
@@ -2915,9 +2958,12 @@ function TeacherApp({
                     <h1>Grade 4B assessment overview</h1>
                     <p>{reviewCount} exams are waiting for review.</p>
                   </div>
-                  <Button icon="review" onClick={() => openReview("Khadija")}>
-                    Open review queue
-                  </Button>
+                  <div className="heading-actions">
+                    <ClassPicker language={language} notify={common.notify} />
+                    <Button icon="review" onClick={() => openReview("Khadija")}>
+                      Open review queue
+                    </Button>
+                  </div>
                 </div>
                 <section className="metric-grid">
                   <article>
@@ -2994,17 +3040,111 @@ function TeacherApp({
                             </Status>
                           </span>
                           <span className="why-cell">{item.why}</span>
-                          <Button
-                            icon="eye"
-                            variant="secondary"
-                            onClick={() => openReview(item.student)}
-                          >
-                            {item.flag === "Confirmed" ? "View" : "Review"}
-                          </Button>
+                          <span className="attention-actions">
+                            {item.reviewable && item.flag !== "Support plan" ? (
+                              <Button
+                                icon="eye"
+                                variant="secondary"
+                                onClick={() => openReview(item.student as ReviewStudent)}
+                              >
+                                {item.flag === "Confirmed" ? "View" : "Review"}
+                              </Button>
+                            ) : (
+                              <Button
+                                icon="person"
+                                variant="secondary"
+                                onClick={() => openRecord(item.student)}
+                              >
+                                Open record
+                              </Button>
+                            )}
+                            {item.student === "Khadija" && practicePending ? (
+                              <Button
+                                icon="bell"
+                                variant="ghost"
+                                onClick={() => sendPracticeReminder("Khadija", common)}
+                              >
+                                Send reminder
+                              </Button>
+                            ) : (
+                              <Button
+                                icon="message"
+                                variant="ghost"
+                                onClick={() => setNoteFor(item.student)}
+                              >
+                                Send note
+                              </Button>
+                            )}
+                          </span>
                         </div>
                       ))}
                     </div>
                   </article>
+                  <div className="teacher-right">
+                  <TodayPanel
+                    language={language}
+                    items={[
+                      {
+                        en: "Check extracted text",
+                        de: "Erkannten Text prüfen",
+                        count:
+                          (ocrVerified ? 0 : 1) +
+                          (["Mariam", "Salma"] as ReviewStudent[]).filter(
+                            (name) => !verifiedStudents.includes(name),
+                          ).length,
+                        onClick: () =>
+                          openReview(
+                            !ocrVerified
+                              ? "Khadija"
+                              : !verifiedStudents.includes("Salma")
+                                ? "Salma"
+                                : "Mariam",
+                          ),
+                      },
+                      {
+                        en: "Review AI grades",
+                        de: "KI-Bewertungen prüfen",
+                        count:
+                          (awardedMark === null ? 1 : 0) +
+                          (["Mariam", "Salma"] as ReviewStudent[]).filter(
+                            (name) => !otherReviewed.includes(name),
+                          ).length,
+                        onClick: () =>
+                          openReview(
+                            awardedMark === null
+                              ? "Khadija"
+                              : !otherReviewed.includes("Salma")
+                                ? "Salma"
+                                : "Mariam",
+                            "grade",
+                          ),
+                      },
+                      {
+                        en: "Open red flags",
+                        de: "Offene Hinweise",
+                        count: redFlagDecision === null || redFlagDecision === "postponed" ? 1 : 0,
+                        onClick: () => openReview("Khadija", "redflag"),
+                      },
+                      {
+                        en: "Ready to send results",
+                        de: "Ergebnisse bereit zum Senden",
+                        count: awardedMark !== null && !published ? 1 : 0,
+                        onClick: () => openReview("Khadija", "publish"),
+                      },
+                      {
+                        en: "Unanswered messages",
+                        de: "Unbeantwortete Nachrichten",
+                        count: classState.threads.filter((item) => item.status === "open").length,
+                        onClick: () => setView("messages"),
+                      },
+                      {
+                        en: "Practice not done yet",
+                        de: "Übung noch nicht erledigt",
+                        count: 2 + (practicePending ? 1 : 0),
+                        onClick: () => setView("insights"),
+                      },
+                    ]}
+                  />
                   <article className="panel gap-panel">
                     <div className="panel-head">
                       <div>
@@ -3049,6 +3189,7 @@ function TeacherApp({
                       </p>
                     </div>
                   </article>
+                  </div>
                 </section>
               </>
             )}
@@ -3144,9 +3285,7 @@ function TeacherApp({
                         <div className="low-confidence">
                           <span>{selectedEvidence.question}</span>
                           <strong>
-                            {selectedOcrVerified
-                              ? selectedEvidence.corrected
-                              : selectedEvidence.extracted}
+                            {selectedOcrVerified ? savedOcr : selectedEvidence.extracted}
                           </strong>
                           <Status type="warn">{selectedEvidence.confidence} · Check answer</Status>
                         </div>
@@ -3160,52 +3299,58 @@ function TeacherApp({
                           <Status type="good">89% confidence</Status>
                         </div>
                       </div>
+                      <div className="ocr-fix">
+                        <label>
+                          Correct the flagged answer
+                          <input
+                            value={ocrValue}
+                            onChange={(event) =>
+                              setOcrDraft({ ...ocrDraft, [selectedStudent]: event.target.value })
+                            }
+                            onKeyDown={(event) => {
+                              if (event.key === "Enter") verifyOcr(true);
+                            }}
+                          />
+                        </label>
+                        <div className="template-chips" aria-label="Suggestions">
+                          {[...new Set([selectedEvidence.corrected, ocrReadAs])].map((option) => (
+                            <button
+                              type="button"
+                              key={option}
+                              className={ocrValue === option ? "selected" : ""}
+                              onClick={() => setOcrDraft({ ...ocrDraft, [selectedStudent]: option })}
+                            >
+                              {option}
+                              <small>
+                                {option === ocrReadAs ? "As read by AI" : "Suggested correction"}
+                              </small>
+                            </button>
+                          ))}
+                        </div>
+                        <p className="ocr-tip">
+                          <Icon name="idea" size={16} />
+                          Often confused in handwriting: 2 and 7, 1 and 7, 4 and 9. Press Enter to
+                          verify and go to the next flagged item.
+                        </p>
+                      </div>
                       {selectedOcrVerified && (
                         <div className="confirmed-box">
                           <Icon name="check" />
                           <div>
                             <strong>OCR verified</strong>
-                            <p>The flagged answer is saved as {selectedEvidence.corrected}.</p>
+                            <p>The flagged answer is saved as {savedOcr}.</p>
                           </div>
                         </div>
                       )}
                       <div className="decision-actions">
-                        <Button
-                          icon="check"
-                          onClick={() => {
-                            if (selectedStudent === "Khadija") setOcrVerified(true);
-                            if (selectedStudent !== "Khadija")
-                              setVerifiedStudents([
-                                ...new Set([...verifiedStudents, selectedStudent]),
-                              ]);
-                            if (selectedStudent === "Khadija") setStudentAnswer("528");
-                            if (!selectedOcrVerified)
-                              logActivity("ocr", selectedStudent, {
-                                EN: `Quiz 4 · ${selectedEvidence.question}: OCR ${selectedEvidence.extracted} corrected to ${selectedEvidence.corrected}`,
-                                DE: `Quiz 4 · ${selectedEvidence.question}: OCR ${selectedEvidence.extracted} korrigiert zu ${selectedEvidence.corrected}`,
-                              });
-                            notify(`OCR verified for ${selectedStudent}.`);
-                          }}
-                        >
+                        <Button icon="check" disabled={!ocrValue.trim()} onClick={() => verifyOcr(false)}>
                           Verify OCR
                         </Button>
                         <Button
                           icon="arrow"
                           variant="secondary"
-                          onClick={() => {
-                            if (selectedStudent === "Khadija") setOcrVerified(true);
-                            if (selectedStudent !== "Khadija")
-                              setVerifiedStudents([
-                                ...new Set([...verifiedStudents, selectedStudent]),
-                              ]);
-                            if (selectedStudent === "Khadija") setStudentAnswer("528");
-                            if (!selectedOcrVerified)
-                              logActivity("ocr", selectedStudent, {
-                                EN: `Quiz 4 · ${selectedEvidence.question}: OCR ${selectedEvidence.extracted} corrected to ${selectedEvidence.corrected}`,
-                                DE: `Quiz 4 · ${selectedEvidence.question}: OCR ${selectedEvidence.extracted} korrigiert zu ${selectedEvidence.corrected}`,
-                              });
-                            setStage("grade");
-                          }}
+                          disabled={!ocrValue.trim()}
+                          onClick={() => verifyOcr(true)}
                         >
                           Next flagged
                         </Button>
@@ -3241,7 +3386,9 @@ function TeacherApp({
                           <p className="kicker">AI MARK PROPOSAL</p>
                           <h2>
                             {selectedStudent === "Khadija"
-                              ? "Award 3 of 3 marks"
+                              ? aiQ2 === 3
+                                ? "Award 3 of 3 marks"
+                                : "Award 0 of 3 marks"
                               : selectedStudent === "Mariam"
                                 ? "Award 2 of 4 marks"
                                 : "Hold for teacher decision"}
@@ -3253,7 +3400,9 @@ function TeacherApp({
                       </Status>
                       <p>
                         {selectedStudent === "Khadija"
-                          ? "The corrected answer 528 matches the expected result. The calculation is correct."
+                          ? aiQ2 === 3
+                            ? "The corrected answer 528 matches the expected result. The calculation is correct."
+                            : `The answer ${studentAnswer} does not match the expected result 528.`
                           : "The response contains partial evidence, but the reasoning is incomplete."}
                       </p>
                       <div className="rubric">
@@ -3263,7 +3412,7 @@ function TeacherApp({
                         </div>
                         <div>
                           <span>AI mark</span>
-                          <b>{selectedStudent === "Khadija" ? "3 / 3" : "2 / 4"}</b>
+                          <b>{selectedStudent === "Khadija" ? `${aiQ2} / 3` : "2 / 4"}</b>
                         </div>
                         <div>
                           <span>Teacher mark</span>
@@ -3274,6 +3423,14 @@ function TeacherApp({
                           </b>
                         </div>
                       </div>
+                      {selectedStudent === "Khadija" && (
+                        <GradeBreakdown
+                          language={language}
+                          q2Mark={awardedMark ?? aiQ2}
+                          q2Confirmed={awardedMark !== null}
+                          answer={studentAnswer}
+                        />
+                      )}
                       <label className="feedback-field">
                         Feedback to student
                         <textarea
@@ -3310,7 +3467,7 @@ function TeacherApp({
                         />
                       </label>
                       <div className="decision-actions">
-                        <Button icon="check" onClick={() => confirmMark(3, "528")}>
+                        <Button icon="check" onClick={() => confirmMark(aiQ2, studentAnswer)}>
                           Confirm AI mark
                         </Button>
                         <Button
@@ -3318,7 +3475,7 @@ function TeacherApp({
                           variant="secondary"
                           onClick={() => {
                             setOverrideAnswer(studentAnswer);
-                            setOverrideMark(awardedMark ?? 3);
+                            setOverrideMark(awardedMark ?? aiQ2);
                             setModal(true);
                           }}
                         >
@@ -3415,6 +3572,7 @@ function TeacherApp({
                         Postpone
                       </Button>
                     </div>
+                    <ResourcesPanel language={language} />
                   </section>
                 )}
 
@@ -3664,7 +3822,7 @@ function TeacherApp({
                         <Button
                           icon="message"
                           variant="ghost"
-                          onClick={() => notify(`Check-in note opened for ${name}.`)}
+                          onClick={() => setNoteFor(name)}
                         >
                           Add note
                         </Button>
@@ -3672,7 +3830,53 @@ function TeacherApp({
                     );
                   })}
                 </section>
+                <QuizMonitor khadija={khadijaLive} {...common} />
               </>
+            )}
+
+            {view === "students" && (
+              <RosterPage
+                khadija={khadijaLive}
+                language={language}
+                onOpen={openRecord}
+                onNote={setNoteFor}
+              />
+            )}
+            {view === "student" && (
+              <StudentRecord
+                name={recordName}
+                khadija={khadijaLive}
+                onBack={() => setView("students")}
+                onReview={() => openReview("Khadija")}
+                onNote={() => setNoteFor(recordName)}
+                {...common}
+              />
+            )}
+            {view === "assessments" && (
+              <AssessmentsPage
+                khadija={khadijaLive}
+                onReview={(name) => openReview(name as ReviewStudent)}
+                {...common}
+              />
+            )}
+            {view === "byquestion" && <QuestionReview {...common} />}
+            {view === "gradebook" && <Gradebook khadija={khadijaLive} {...common} />}
+            {view === "skilltree" && <SkillTree onOpenStudent={openRecord} {...common} />}
+            {view === "messages" && (
+              <MessagesPage
+                onReview={() => openReview("Khadija", "grade")}
+                onNote={setNoteFor}
+                {...common}
+              />
+            )}
+            {view === "profile" && (
+              <TeacherProfile
+                language={language}
+                setLanguage={setLanguage}
+                published={published}
+                setShareParent={setShareParent}
+                notify={common.notify}
+              />
             )}
           </main>
         </div>
@@ -3719,6 +3923,9 @@ function TeacherApp({
               </div>
             </div>
           </div>
+        )}
+        {noteFor && (
+          <NoteComposer student={noteFor} onClose={() => setNoteFor(null)} {...common} />
         )}
         {drawer && (
           <>
@@ -4234,6 +4441,8 @@ export default function App() {
           onNotifications={() => setNotificationCenterOpen(true)}
           addNotification={addNotification}
           navigationRequest={navigationRequest}
+          practiced={practiced}
+          practiceScore={practiceScore}
         />
       )}
       {role === "parent" && !notificationCenterOpen && (

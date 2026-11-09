@@ -1,5 +1,41 @@
 # Changes
 
+## 2026-11-10 — Part C (Teacher view)
+
+New files: `src/ui.tsx` (Icon/Button/Status moved out of App.tsx, unchanged), `src/store.ts`
+(shared class data: roster of 22, marking scheme, messages, resources, rules), `src/teacher.tsx`
+(teacher pages, German via their own `t(en, de)`).
+
+- C1 Dashboard: class/subject picker, "To do today" counts (text checks, AI grades, red flags,
+  results to send, unanswered messages, practice not done), each linking to the task.
+- C2/C27 Students page: 22-student roster with search and filters; C25/C19/C20 student record
+  (quiz history, concept mastery, gap evidence, recurring mistake, practice status, messages).
+- C3 Assessments: all assessments, new-assessment form (subject, language, marks, date, model
+  answers), editable Quiz 4 marking scheme with partial-mark rules and saved rules.
+- C4/C6 Quiz 4 submissions with live status per student; bulk upload of scans (matched to Judy,
+  the one missing paper).
+- C8/C10 OCR: the flagged answer is now an editable field (starts at the AI reading 578),
+  suggestion chips, tip on confusable digits, Enter = verify + next. The AI proposal follows the
+  verified text (528 → 3/3, otherwise 0/3).
+- C11/C12/C14/C21 Grade step: all 8 AI marks sorted least-certain first, marking criteria for Q2,
+  editable AI mistake tags.
+- C15/C16 Review by question: answer groups per question, inconsistent marks highlighted,
+  bulk correction preview + approve, optional saved rule (Hana and Rana Q5 1/4 → 2/4).
+- C18 Gradebook (confirmed results only) with real CSV export.
+- C23/C33 Skill tree (3 strands, 8 skills, mastery with icon + label), affected students,
+  group practice, revision plan.
+- C24 Attention list: 5 students, Open record / Send note / Send reminder actions.
+- C30 Resource approval on the red-flag step (video on/off, printable replace/remove); the
+  student's mini lesson follows it.
+- C31 Pop-quiz monitoring on Class insights with reminders.
+- C32 Messages: student questions and error reports become threads; teacher replies (suggested
+  replies) or resolves; notes to students; student "My messages" page shows replies.
+- C34 Teacher profile and settings (language, default parent sharing, email digest demo).
+- Fixed: sidebar showed "0" next to Messages when there were no open messages.
+
+Tests: tsc, build pass. Playwright `pw/e2e-C.mjs` EN 34/34, DE 35/35 (DE also covers the
+578 → 0/3 path and the override), no console errors; Part A+B regression `pw/e2e-AB.mjs` EN/DE 22/22.
+
 ## 2026-11-09 (2) — Parts A and B completed
 
 ### Part A

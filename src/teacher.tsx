@@ -13,6 +13,7 @@ import {
   type RosterStudent,
   type Text,
   type Thread,
+  type ThreadMessage,
 } from "./store";
 
 /** What the teacher pages need to know about Khadija's live Quiz 4 review. */
@@ -36,6 +37,10 @@ const makeT = (language: Lang) => (en: string, de: string) => (language === "DE"
 const initials = (name: string) => name.slice(0, 2).toUpperCase();
 const clock = (at: number) =>
   new Date(at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+/** Message text in the current language (seeded demo messages carry a German version). */
+export const messageText = (m: ThreadMessage, language: Lang) =>
+  language === "DE" && m.textDe ? m.textDe : m.text;
+export const messageTime = (m: ThreadMessage, language: Lang) => (m.when ? m.when[language] : clock(m.at));
 
 // ---------------------------------------------------------------------------
 // Skills (used by the skill tree, student records and the revision plan)
@@ -520,13 +525,21 @@ export function StudentRecord({
                 : t("Send reminder", "Erinnerung senden")}
             </Button>
           )}
+          {isKhadija && (
+            <Status type={s.parentAck ? "good" : "neutral"}>
+              {s.parentAck
+                ? t("Parent acknowledged the Quiz 4 report", "Eltern haben den Quiz-4-Bericht bestätigt")
+                : t("Parent has not acknowledged a Quiz 4 report yet", "Eltern haben noch keinen Quiz-4-Bericht bestätigt")}
+            </Status>
+          )}
           <h3 className="record-sub">{t("Messages", "Nachrichten")}</h3>
           {threads.length === 0 ? (
             <p>{t("No messages yet.", "Noch keine Nachrichten.")}</p>
           ) : (
             threads.map((thread) => (
               <p className="record-thread" key={thread.id}>
-                <b>{thread.title[common.language]}</b> · {thread.messages[thread.messages.length - 1].text}
+                <b>{thread.title[common.language]}</b> ·{" "}
+                {messageText(thread.messages[thread.messages.length - 1], common.language)}
               </p>
             ))
           )}
@@ -1357,7 +1370,15 @@ export function MessagesPage({ onReview, onNote, ...common }: Common & { onRevie
   const list = s.threads.filter((x) => filter === "all" || x.status === "open");
   const selected = s.threads.find((x) => x.id === selectedId) ?? list[0] ?? null;
   const suggestions =
-    selected?.kind === "report"
+    selected?.kind === "parent"
+      ? [
+          t(
+            "Thank you for your message. Khadija is doing the fraction practice; 10 minutes with drawings at home will help.",
+            "Danke für Ihre Nachricht. Khadija macht die Bruchübung; 10 Minuten mit Zeichnungen zu Hause helfen.",
+          ),
+          t("Happy to talk – would Tuesday after school suit you?", "Gerne im Gespräch – passt Ihnen Dienstag nach der Schule?"),
+        ]
+      : selected?.kind === "report"
       ? [
           t("I checked it again and your mark is correct.", "Ich habe es noch einmal geprüft, deine Punkte stimmen."),
           t("Thank you! I corrected it.", "Danke! Ich habe es korrigiert."),
@@ -1374,10 +1395,23 @@ export function MessagesPage({ onReview, onNote, ...common }: Common & { onRevie
     const text = reply.trim();
     if (text) addThreadMessage(selected.id, { from: "teacher", text, at: Date.now() }, resolve ? "resolved" : "answered");
     else updateClassState((st) => ({ threads: st.threads.map((x) => (x.id === selected.id ? { ...x, status: "resolved" } : x)) }));
+    if (selected.kind === "parent") {
+      logActivity("parent", selected.student, { EN: "Teacher replied to the parent", DE: "Lehrerin hat den Eltern geantwortet" }, "teacher");
+      common.addNotification(
+        "parent",
+        { EN: "Ms. Ashraf replied", DE: "Frau Ashraf hat geantwortet" },
+        { EN: text, DE: text },
+        { EN: "Read reply", DE: "Antwort lesen" },
+        "messages",
+      );
+      common.notify(t("Reply sent.", "Antwort gesendet."));
+      setReply("");
+      return;
+    }
     logActivity(selected.kind === "report" ? "report" : "question", selected.student, {
       EN: resolve ? "Teacher resolved the report" : "Teacher replied",
       DE: resolve ? "Meldung von der Lehrerin erledigt" : "Lehrerin hat geantwortet",
-    });
+    }, "teacher");
     if (selected.student === "Khadija")
       common.addNotification(
         "student",
@@ -1420,12 +1454,12 @@ export function MessagesPage({ onReview, onNote, ...common }: Common & { onRevie
               className={`thread-row ${selected?.id === thread.id ? "selected" : ""}`}
               onClick={() => setSelectedId(thread.id)}
             >
-              <Icon name={thread.kind === "report" ? "flag" : "message"} size={18} />
+              <Icon name={thread.kind === "report" ? "flag" : thread.kind === "parent" ? "family" : "message"} size={18} />
               <span>
                 <strong>
                   {thread.student} · {thread.title[common.language]}
                 </strong>
-                <small>{thread.messages[thread.messages.length - 1].text}</small>
+                <small>{messageText(thread.messages[thread.messages.length - 1], common.language)}</small>
               </span>
               <Status type={thread.status === "open" ? "warn" : "good"}>
                 {thread.status === "open" ? t("Open", "Offen") : thread.status === "answered" ? t("Answered", "Beantwortet") : t("Resolved", "Erledigt")}
@@ -1447,9 +1481,14 @@ export function MessagesPage({ onReview, onNote, ...common }: Common & { onRevie
                 {selected.messages.map((m, i) => (
                   <p key={i} className={`bubble ${m.from}`} data-free-text>
                     <small>
-                      {m.from === "teacher" ? "Ms. Ashraf" : selected.student} · {clock(m.at)}
+                      {m.from === "teacher"
+                        ? t("Ms. Ashraf", "Frau Ashraf")
+                        : m.from === "parent"
+                          ? t("Khadija’s parent", "Khadijas Elternteil")
+                          : selected.student}{" "}
+                      · {messageTime(m, common.language)}
                     </small>
-                    {m.text}
+                    {messageText(m, common.language)}
                   </p>
                 ))}
               </div>

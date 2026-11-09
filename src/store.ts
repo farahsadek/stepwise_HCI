@@ -22,16 +22,81 @@ export type Notifier = (
   target: NotificationTarget,
 ) => void;
 
-export type ThreadMessage = { from: "student" | "teacher"; text: string; at: number };
+/** `textDe` is only set for seeded demo messages; typed messages are shown as written. */
+export type ThreadMessage = {
+  from: "student" | "teacher" | "parent";
+  text: string;
+  textDe?: string;
+  at: number;
+  when?: Text;
+};
 export type Thread = {
   id: number;
   student: string;
-  kind: "question" | "report" | "note";
+  kind: "question" | "report" | "note" | "parent";
   question?: number;
   title: Text;
   messages: ThreadMessage[];
   status: "open" | "answered" | "resolved";
 };
+/** Khadija's Quiz 4 questions (marks before the teacher's Q2 decision). */
+export const questions = [
+  { n: 1, title: "24 × 6", answer: "144", marks: "2 / 2", state: "good", label: "Correct" },
+  { n: 2, title: "132 × 4", answer: "528", marks: "3 / 3", state: "warn", label: "Needs review" },
+  {
+    n: 3,
+    title: "Shade 3/4",
+    answer: "2/4 shaded",
+    marks: "0 / 3",
+    state: "bad",
+    label: "Learning gap",
+  },
+  { n: 4, title: "1/2 + 1/4", answer: "3/4", marks: "3 / 3", state: "good", label: "Correct" },
+  {
+    n: 5,
+    title: "Share 20 apples",
+    answer: "4 each, no working",
+    marks: "2 / 4",
+    state: "warn",
+    label: "Partial marks",
+  },
+  { n: 6, title: "450 ÷ 5", answer: "90", marks: "3 / 3", state: "good", label: "Correct" },
+  {
+    n: 7,
+    title: "Compare 2/3 and 3/5",
+    answer: "2/3 < 3/5",
+    marks: "0 / 3",
+    state: "bad",
+    label: "Learning gap",
+  },
+  {
+    n: 8,
+    title: "Bus seats word problem",
+    answer: "48 seats",
+    marks: "4 / 4",
+    state: "good",
+    label: "Correct",
+  },
+] as const;
+
+export const questionTitlesDe = [
+  "24 × 6",
+  "132 × 4",
+  "Färbe 3/4",
+  "1/2 + 1/4",
+  "Teile 20 Äpfel",
+  "450 ÷ 5",
+  "Vergleiche 2/3 und 3/5",
+  "Sachaufgabe mit Bussitzen",
+];
+
+/** Khadija's per-topic results in Quiz 2, 3 and 4 (Quiz 4 shown only after publishing). */
+export const khadijaConcepts: { name: Text; values: number[]; level: "good" | "neutral" | "warn" }[] = [
+  { name: { EN: "Multiplication", DE: "Multiplizieren" }, values: [80, 85, 90], level: "good" },
+  { name: { EN: "Word problems", DE: "Sachaufgaben" }, values: [55, 65, 75], level: "neutral" },
+  { name: { EN: "Comparing fractions", DE: "Brüche vergleichen" }, values: [30, 35, 33], level: "warn" },
+];
+
 export type Resources = { video: boolean; printable: "worksheet" | "game" | "none" };
 export type SavedRule = { id: number; scope: Text; text: Text };
 export type SchemeItem = { n: number; marks: number; model: string; rule: Text };
@@ -106,10 +171,31 @@ type ClassState = {
   remindersSent: string[];
   assessments: Assessment[];
   shareDefault: boolean;
+  parentAck: boolean;
+  /** Number of messages in the parent conversation the parent has already seen. */
+  parentSeen: number;
 };
 
 let state: ClassState = {
-  threads: [],
+  threads: [
+    {
+      id: 1,
+      student: "Khadija",
+      kind: "parent",
+      title: { EN: "Messages with Khadija’s parent", DE: "Nachrichten mit Khadijas Elternteil" },
+      messages: [
+        {
+          from: "teacher",
+          text: "Khadija is building confidence with multiplication. Short fraction activities at home will help.",
+          textDe:
+            "Khadija wird beim Multiplizieren sicherer. Kurze Bruchübungen zu Hause helfen ihr.",
+          at: 0,
+          when: { EN: "4 October", DE: "4. Oktober" },
+        },
+      ],
+      status: "answered",
+    },
+  ],
   resources: { video: true, printable: "worksheet" },
   otherReviewed: [],
   verifiedStudents: [],
@@ -137,6 +223,8 @@ let state: ClassState = {
     { id: 4, title: { EN: "Quiz 4: Fractions and word problems", DE: "Quiz 4: Brüche und Sachaufgaben" }, subject: { EN: "Mathematics", DE: "Mathematik" }, date: { EN: "17 October", DE: "17. Oktober" }, language: "EN", marks: 25, status: "review" },
   ],
   shareDefault: true,
+  parentAck: false,
+  parentSeen: 1,
 };
 const listeners = new Set<() => void>();
 let nextId = 100;

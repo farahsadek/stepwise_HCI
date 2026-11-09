@@ -10,7 +10,7 @@ import {
 import { ActivityHistoryPage, RecentActivity, RoleActivity, logActivity } from "./activity";
 import { AccessibilityToolbar, requestReadAloud } from "./accessibility";
 import { Button, Icon, Status, type IconName } from "./ui";
-import { newId, updateClassState, useClassState } from "./store";
+import { khadijaConcepts, newId, questions, updateClassState, useClassState } from "./store";
 import {
   AssessmentsPage,
   ClassPicker,
@@ -29,6 +29,22 @@ import {
   sendPracticeReminder,
   type KhadijaLive,
 } from "./teacher";
+import {
+  ChildSwitcher,
+  LearningAlert,
+  ParentConcepts,
+  ParentMessages,
+  ParentProfile,
+  ParentResources,
+  ParentResults,
+  ParentTabs,
+  PracticeStatus,
+  ProgressReport,
+  SiblingView,
+  type Child,
+  type ParentQuiz,
+  type ParentTab,
+} from "./parent";
 import { CameraCapture, ExplainerVideo, analyzePage, type PageQuality } from "./student-media";
 
 type Role = "student" | "teacher" | "parent";
@@ -569,45 +585,6 @@ function PencilPal({ className = "" }: { className?: string }) {
     </svg>
   );
 }
-
-const questions = [
-  { n: 1, title: "24 × 6", answer: "144", marks: "2 / 2", state: "good", label: "Correct" },
-  { n: 2, title: "132 × 4", answer: "528", marks: "3 / 3", state: "warn", label: "Needs review" },
-  {
-    n: 3,
-    title: "Shade 3/4",
-    answer: "2/4 shaded",
-    marks: "0 / 3",
-    state: "bad",
-    label: "Learning gap",
-  },
-  { n: 4, title: "1/2 + 1/4", answer: "3/4", marks: "3 / 3", state: "good", label: "Correct" },
-  {
-    n: 5,
-    title: "Share 20 apples",
-    answer: "4 each, no working",
-    marks: "2 / 4",
-    state: "warn",
-    label: "Partial marks",
-  },
-  { n: 6, title: "450 ÷ 5", answer: "90", marks: "3 / 3", state: "good", label: "Correct" },
-  {
-    n: 7,
-    title: "Compare 2/3 and 3/5",
-    answer: "2/3 < 3/5",
-    marks: "0 / 3",
-    state: "bad",
-    label: "Learning gap",
-  },
-  {
-    n: 8,
-    title: "Bus seats word problem",
-    answer: "48 seats",
-    marks: "4 / 4",
-    state: "good",
-    label: "Correct",
-  },
-] as const;
 
 function TopBar({
   role,
@@ -1174,7 +1151,9 @@ function StudentApp({
     ),
   };
   const classState = useClassState();
-  const myThreads = classState.threads.filter((thread) => thread.student === "Khadija");
+  const myThreads = classState.threads.filter(
+    (thread) => thread.student === "Khadija" && thread.kind !== "parent",
+  );
   const addThread = (kind: "question" | "report", q: number, text: string) =>
     updateClassState((current) => ({
       threads: [
@@ -2247,19 +2226,19 @@ function StudentApp({
                 {[
                   {
                     name: t("Multiplication", "Multiplizieren"),
-                    values: [80, 85, 90],
+                    values: khadijaConcepts[0].values,
                     type: "good" as const,
                     label: t("Strong", "Stark"),
                   },
                   {
                     name: t("Word problems", "Sachaufgaben"),
-                    values: [55, 65, 75],
+                    values: khadijaConcepts[1].values,
                     type: "neutral" as const,
                     label: t("Getting better", "Wird besser"),
                   },
                   {
                     name: t("Comparing fractions", "Brüche vergleichen"),
-                    values: [30, 35, 33],
+                    values: khadijaConcepts[2].values,
                     type: "warn" as const,
                     label: t("Needs more practice", "Braucht mehr Übung"),
                   },
@@ -3624,6 +3603,40 @@ function TeacherApp({
                               ? "Freigabe für Elternteil eingeschaltet"
                               : "Freigabe für Elternteil ausgeschaltet",
                           });
+                          // Sharing after publishing: the parent is told now, not at publish time.
+                          if (published && e.target.checked) {
+                            logActivity("share", "Khadija", {
+                              EN: "Quiz 4 results shared with Khadija’s parent",
+                              DE: "Ergebnisse von Quiz 4 mit Khadijas Elternteil geteilt",
+                            });
+                            if (redFlagDecision === "confirmed")
+                              addNotification(
+                                "parent",
+                                {
+                                  EN: "Learning alert: comparing fractions",
+                                  DE: "Lernhinweis: Brüche vergleichen",
+                                },
+                                {
+                                  EN: "Ms. Ashraf confirmed that Khadija needs extra practice with comparing fractions.",
+                                  DE: "Frau Ashraf hat bestätigt, dass Khadija beim Vergleichen von Brüchen mehr Übung braucht.",
+                                },
+                                { EN: "See what helps", DE: "Hilfe ansehen" },
+                                "summary",
+                              );
+                            addNotification(
+                              "parent",
+                              {
+                                EN: "Khadija's Quiz 4 results are published",
+                                DE: "Khadijas Ergebnisse für Quiz 4 wurden veröffentlicht",
+                              },
+                              {
+                                EN: "Ms. Ashraf shared Khadija’s latest maths result.",
+                                DE: "Frau Ashraf hat Khadijas aktuelles Matheergebnis geteilt.",
+                              },
+                              { EN: "View summary", DE: "Zusammenfassung ansehen" },
+                              "summary",
+                            );
+                          }
                         }}
                       />
                       <span>
@@ -3685,6 +3698,21 @@ function TeacherApp({
                             },
                             { EN: "Start practice", DE: "Übung starten" },
                             "practice",
+                          );
+                        }
+                        if (shareParent && redFlagDecision === "confirmed") {
+                          addNotification(
+                            "parent",
+                            {
+                              EN: "Learning alert: comparing fractions",
+                              DE: "Lernhinweis: Brüche vergleichen",
+                            },
+                            {
+                              EN: "Ms. Ashraf confirmed that Khadija needs extra practice with comparing fractions.",
+                              DE: "Frau Ashraf hat bestätigt, dass Khadija beim Vergleichen von Brüchen mehr Übung braucht.",
+                            },
+                            { EN: "See what helps", DE: "Hilfe ansehen" },
+                            "summary",
                           );
                         }
                         if (shareParent) {
@@ -3995,28 +4023,73 @@ function ParentApp({
   published,
   shareParent,
   teacherFeedback,
+  studentAnswer,
+  redFlagDecision,
+  practiced,
+  practiceScore,
   language,
   setLanguage,
   onExit,
   notify,
   unreadCount,
   onNotifications,
+  addNotification,
+  navigationRequest,
 }: {
   awardedMark: number | null;
   published: boolean;
   shareParent: boolean;
   teacherFeedback: string;
+  studentAnswer: string;
+  redFlagDecision: "confirmed" | "dismissed" | "postponed" | null;
+  practiced: boolean;
+  practiceScore: number | null;
   language: "EN" | "DE";
   setLanguage: (l: "EN" | "DE") => void;
   onExit: () => void;
   notify: (m: string | ToastState) => void;
   unreadCount: number;
   onNotifications: () => void;
+  addNotification: AddNotification;
+  navigationRequest: NavigationRequest;
 }) {
+  const [tab, setTab] = useState<ParentTab>("overview");
+  const [child, setChild] = useState<Child>("Khadija");
+  const classState = useClassState();
   const visible = published && shareParent && awardedMark !== null;
   const quizStatus = published && !shareParent ? "Results not shared yet" : "Teacher reviewing";
   const score = awardedMark === null ? null : 14 + awardedMark;
   const percent = score === null ? null : Math.round((score / 25) * 100);
+  const quiz: ParentQuiz = {
+    visible,
+    publishedNotShared: published && !shareParent,
+    flagConfirmed: redFlagDecision === "confirmed",
+    score: visible ? score : null,
+    percent: visible ? percent : null,
+    awardedMark,
+    studentAnswer,
+    teacherFeedback: translateText(teacherFeedback, language),
+    practiced,
+    practiceScore,
+  };
+  const parentThread = classState.threads.find((item) => item.kind === "parent");
+  const unreadReplies = parentThread
+    ? parentThread.messages
+        .slice(classState.parentSeen)
+        .filter((message) => message.from === "teacher").length
+    : 0;
+  const parentMessageCount = parentThread?.messages.length ?? 0;
+  useEffect(() => {
+    if (tab === "messages" && child === "Khadija")
+      updateClassState({ parentSeen: parentMessageCount });
+  }, [tab, child, parentMessageCount]);
+  const plainNotify = (message: string) => notify(message);
+  useEffect(() => {
+    if (navigationRequest?.role !== "parent") return;
+    setChild("Khadija");
+    setTab(navigationRequest.target === "messages" ? "messages" : "overview");
+  }, [navigationRequest]);
+
   return (
     <Localize language={language}>
       <div className="app-shell parent-shell">
@@ -4027,126 +4100,174 @@ function ParentApp({
           onExit={onExit}
           unreadCount={unreadCount}
           onNotifications={onNotifications}
+          onProfile={() => setTab("profile")}
         />
         <main className="parent-main">
-          <section className="parent-hello">
-            <div className="parent-avatar">K</div>
-            <div>
-              <p className="kicker">KHADIJA’S LEARNING</p>
-              <h1>A clear view of her learning.</h1>
-              <p>Grade 4B · Ms. Somaya Ashraf</p>
-            </div>
-          </section>
-
-          <article
-            className={`parent-score card parent-quiz-status ${visible ? "is-published" : "is-pending"}`}
-          >
-            <div className="parent-quiz-summary">
-              <div>
-                <div className="parent-status-row">
-                  <Status type={visible ? "good" : "neutral"}>
-                    {visible ? "Published" : quizStatus}
-                  </Status>
-                  {visible && <Status type="good">New</Status>}
+          <ChildSwitcher
+            language={language}
+            child={child}
+            setChild={(next) => {
+              setChild(next);
+              setTab("overview");
+            }}
+          />
+          {child === "Yara" ? (
+            <SiblingView language={language} />
+          ) : tab === "profile" ? (
+            <ParentProfile
+              language={language}
+              setLanguage={setLanguage}
+              notify={plainNotify}
+              onBack={() => setTab("overview")}
+            />
+          ) : (
+            <>
+              <section className="parent-hello">
+                <div className="parent-avatar">K</div>
+                <div>
+                  <p className="kicker">KHADIJA’S LEARNING</p>
+                  <h1>A clear view of her learning.</h1>
+                  <p>Grade 4B · Ms. Somaya Ashraf</p>
                 </div>
-                <p className="kicker">QUIZ 4 · MATHEMATICS</p>
-                <h2>Fractions and word problems</h2>
-                {visible ? (
-                  <p>{teacherFeedback}</p>
-                ) : (
-                  <p>
-                    {published && !shareParent
-                      ? "Quiz 4 results are ready but have not been shared with you yet."
-                      : "Ms. Ashraf is checking Khadija’s quiz. You’ll be notified when results are ready."}
+              </section>
+              <ParentTabs
+                language={language}
+                tab={tab}
+                setTab={setTab}
+                unreadMessages={unreadReplies}
+              />
+
+              {tab === "overview" && (
+                <>
+                  <article
+                    className={`parent-score card parent-quiz-status ${visible ? "is-published" : "is-pending"}`}
+                  >
+                    <div className="parent-quiz-summary">
+                      <div>
+                        <div className="parent-status-row">
+                          <Status type={visible ? "good" : "neutral"}>
+                            {visible ? "Published" : quizStatus}
+                          </Status>
+                          {visible && <Status type="good">New</Status>}
+                        </div>
+                        <p className="kicker">QUIZ 4 · MATHEMATICS</p>
+                        <h2>Fractions and word problems</h2>
+                        {visible ? (
+                          <p>{teacherFeedback}</p>
+                        ) : (
+                          <p>
+                            {published && !shareParent
+                              ? "Quiz 4 results are ready but have not been shared with you yet."
+                              : "Ms. Ashraf is checking Khadija’s quiz. You’ll be notified when results are ready."}
+                          </p>
+                        )}
+                      </div>
+                      {visible && (
+                        <strong>
+                          {score}
+                          <small>/25 · {percent}%</small>
+                        </strong>
+                      )}
+                    </div>
+                    <ParentTracker published={visible} language={language} />
+                  </article>
+
+                  <article className="parent-score card previous-score">
+                    <div>
+                      <Status type="good">Published</Status>
+                      <p className="kicker">QUIZ 3 · MATHEMATICS</p>
+                      <h2>Multiplication and simple fractions</h2>
+                      <p>3 October</p>
+                    </div>
+                    <strong>
+                      64<small>%</small>
+                    </strong>
+                  </article>
+
+                  <LearningAlert language={language} quiz={quiz} onHelp={() => setTab("resources")} />
+
+                  <article className="parent-message card">
+                    <span>
+                      <Icon name="check" />
+                    </span>
+                    <div>
+                      <h2>What’s going well</h2>
+                      <p>
+                        Khadija is doing well with multiplication facts and uses clear number
+                        strategies.
+                      </p>
+                    </div>
+                  </article>
+
+                  <article className="parent-message peach card">
+                    <span>
+                      <Icon name="idea" />
+                    </span>
+                    <div>
+                      <h2>What to practise next</h2>
+                      <p>Use simple drawings to compare halves, thirds and quarters.</p>
+                    </div>
+                  </article>
+
+                  <PracticeStatus language={language} quiz={quiz} />
+                  <RoleActivity role="parent" language={language} />
+                  <ProgressReport
+                    language={language}
+                    quiz={quiz}
+                    addNotification={addNotification}
+                    notify={plainNotify}
+                  />
+
+                  <Button icon="message" onClick={() => setTab("messages")}>
+                    Message Ms. Ashraf
+                  </Button>
+                  <p className="parent-note">
+                    <Icon name="lock" size={15} /> Quiz 4 results appear only after Ms. Ashraf
+                    publishes and shares them.
                   </p>
-                )}
-              </div>
-              {visible && (
-                <strong>
-                  {score}
-                  <small>/25 · {percent}%</small>
-                </strong>
+                </>
               )}
-            </div>
-            <ParentTracker published={visible} language={language} />
-          </article>
 
-          <article className="parent-score card previous-score">
-            <div>
-              <Status type="good">Published</Status>
-              <p className="kicker">QUIZ 3 · MATHEMATICS</p>
-              <h2>Multiplication and simple fractions</h2>
-              <p>3 October</p>
-            </div>
-            <strong>
-              64<small>%</small>
-            </strong>
-          </article>
+              {tab === "results" && (
+                <ParentResults language={language} quiz={quiz} onMessage={() => setTab("messages")} />
+              )}
 
-          <article className="parent-message card">
-            <span>
-              <Icon name="check" />
-            </span>
-            <div>
-              <h2>What’s going well</h2>
-              <p>
-                Khadija is doing well with multiplication facts and uses clear number strategies.
-              </p>
-            </div>
-          </article>
+              {tab === "progress" && (
+                <>
+                  <article className="parent-progress card parent-chart parent-history">
+                    <div>
+                      <p className="kicker">PUBLISHED QUIZZES</p>
+                      <h2>Progress so far</h2>
+                    </div>
+                    <StairChart
+                      values={visible && percent !== null ? [52, 58, 64, percent] : [52, 58, 64]}
+                      label={translateText("Progress staircase", language)}
+                    />
+                    <div className="chart-labels">
+                      <span>Quiz 1</span>
+                      <span>Quiz 2</span>
+                      <span>Quiz 3</span>
+                      {visible && <span>Quiz 4</span>}
+                    </div>
+                  </article>
+                  <ParentConcepts language={language} quiz={quiz} />
+                  <PracticeStatus language={language} quiz={quiz} />
+                </>
+              )}
 
-          <article className="parent-message peach card">
-            <span>
-              <Icon name="idea" />
-            </span>
-            <div>
-              <h2>What to practise next</h2>
-              <p>Use simple drawings to compare halves, thirds and quarters.</p>
-            </div>
-          </article>
+              {tab === "resources" && (
+                <ParentResources language={language} quiz={quiz} notify={plainNotify} />
+              )}
 
-          <article className="parent-progress card parent-chart parent-history">
-            <div>
-              <p className="kicker">PUBLISHED QUIZZES</p>
-              <h2>Progress so far</h2>
-            </div>
-            <StairChart values={[52, 58, 64]} label={translateText("Progress staircase", language)} />
-            <div className="chart-labels">
-              <span>Quiz 1</span>
-              <span>Quiz 2</span>
-              <span>Quiz 3</span>
-            </div>
-          </article>
-
-          <article className="parent-progress card parent-messages">
-            <div>
-              <p className="kicker">MESSAGES</p>
-              <h2>Messages from Ms. Ashraf</h2>
-            </div>
-            <div className="home-activity">
-              <Icon name="message" />
-              <p>
-                <strong>Ms. Ashraf · 4 October</strong>Khadija is building confidence with
-                multiplication. Short fraction activities at home will help.
-              </p>
-            </div>
-            <Button
-              icon="message"
-              variant="secondary"
-              onClick={() => notify("Reply draft opened for Ms. Ashraf.")}
-            >
-              Reply
-            </Button>
-          </article>
-
-          <Button icon="message" onClick={() => notify("Message draft opened for Ms. Ashraf.")}>
-            Message Ms. Ashraf
-          </Button>
-          <RoleActivity role="parent" language={language} />
-        <p className="parent-note">
-            <Icon name="lock" size={15} /> Quiz 4 results appear only after Ms. Ashraf publishes and
-            shares them.
-          </p>
+              {tab === "messages" && (
+                <ParentMessages
+                  language={language}
+                  addNotification={addNotification}
+                  notify={plainNotify}
+                />
+              )}
+            </>
+          )}
         </main>
       </div>
     </Localize>
@@ -4451,12 +4572,18 @@ export default function App() {
           published={published}
           shareParent={shareParent}
           teacherFeedback={teacherFeedback}
+          studentAnswer={studentAnswer}
+          redFlagDecision={redFlagDecision}
+          practiced={practiced}
+          practiceScore={practiceScore}
           language={language}
           setLanguage={setLanguage}
           onExit={logout}
           notify={notify}
           unreadCount={unreadFor("parent")}
           onNotifications={() => setNotificationCenterOpen(true)}
+          addNotification={addNotification}
+          navigationRequest={navigationRequest}
         />
       )}
       {toast && (

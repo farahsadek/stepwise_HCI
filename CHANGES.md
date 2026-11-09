@@ -1,5 +1,33 @@
 # Changes
 
+## 2026-11-10 (2) — Part D (Parent view)
+
+New file: `src/parent.tsx` (parent sections, German via their own `t(en, de)`). Quiz 4 question
+data and Khadija's per-topic history moved to `src/store.ts` so student and parent read the same
+numbers. Rule kept: Quiz 4 content only when published AND shared; learning alerts only when the
+teacher also confirmed the red flag.
+
+- Parent tabs: Overview, Quiz results, Progress, Help at home, Messages; profile in the user menu.
+- D1 Overview adds learning alert, practice status, shared-results list, progress report.
+- D2 Quiz results: approved score, teacher note, all 8 questions with plain-language explanations
+  (Q2 explains a teacher override).
+- D3/D4 Teacher-confirmed learning alert (repeated mistake across Quiz 2–4) + parent notification
+  on publish, or when the teacher turns sharing on after publishing.
+- D5 Progress chart now includes Quiz 4 when shared; per-topic progress (Quiz 2–4).
+- D6 Help at home: teacher-approved video, a 10-minute activity, approved printable.
+- D7 Practice and pop-quiz status (assigned / done with first-try score).
+- D8 Real conversation with Ms. Ashraf (seeded 4 October message, topic chips); teacher answers in
+  Messages; reply notifies the parent; unread badge.
+- D9 Child switcher (Khadija, Yara in Grade 2A) and parent profile (language, notification prefs).
+- D10 Plain-language report, download (.txt), "I have read this report" → teacher notification,
+  activity log entry by the parent, status on the teacher's student record.
+- Activity log: parent actor with German name; parents no longer see the teacher's share on/off
+  switch events. Teacher replies are now logged with the teacher as actor.
+
+Tests: tsc, build pass. `pw/e2e-D.mjs` EN 33/33, DE 36/36 (DE: override + publish unshared, then
+share later); Part C 34/34 / 35/35 and Part A+B 22/22 / 22/22 still pass; no console errors;
+parent screens have no horizontal scroll at 390px.
+
 ## 2026-11-10 — Part C (Teacher view)
 
 New files: `src/ui.tsx` (Icon/Button/Status moved out of App.tsx, unchanged), `src/store.ts`

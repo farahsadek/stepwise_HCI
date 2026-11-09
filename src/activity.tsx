@@ -12,14 +12,16 @@ export type ActivityKind =
   | "share"
   | "question"
   | "report"
-  | "practice";
+  | "practice"
+  | "parent"
+  | "acknowledged";
 
 type Text = Record<ActivityLang, string>;
 
 export type ActivityEntry = {
   id: number;
   kind: ActivityKind;
-  actor: string;
+  actor: string | Text;
   actorRole: Text;
   student: string;
   detail: Text;
@@ -38,10 +40,14 @@ const kindLabels: Record<ActivityKind, Text> = {
   question: { EN: "Student question", DE: "Frage des Kindes" },
   report: { EN: "Error reported", DE: "Fehler gemeldet" },
   practice: { EN: "Practice completed", DE: "Übung abgeschlossen" },
+  parent: { EN: "Parent communication", DE: "Elternkommunikation" },
+  acknowledged: { EN: "Report acknowledged", DE: "Bericht bestätigt" },
 };
 
 const teacherRole: Text = { EN: "Teacher", DE: "Lehrerin" };
 const studentRole: Text = { EN: "Student", DE: "Schülerin" };
+const parentRole: Text = { EN: "Parent", DE: "Elternteil" };
+const PARENT: Text = { EN: "Khadija’s parent", DE: "Khadijas Elternteil" };
 const TEACHER = "Somaya Ashraf";
 
 let nextId = 100;
@@ -91,16 +97,27 @@ let entries: ActivityEntry[] = [
 ];
 const listeners = new Set<() => void>();
 
-export function logActivity(kind: ActivityKind, student: string, detail: Text) {
+export function logActivity(
+  kind: ActivityKind,
+  student: string,
+  detail: Text,
+  by?: "teacher" | "student" | "parent",
+) {
   const now = new Date();
   const clock = now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-  const byStudent = ["submitted", "question", "report", "practice"].includes(kind);
+  const who =
+    by ??
+    (kind === "acknowledged"
+      ? "parent"
+      : ["submitted", "question", "report", "practice"].includes(kind)
+        ? "student"
+        : "teacher");
   entries = [
     {
       id: nextId++,
       kind,
-      actor: byStudent ? student : TEACHER,
-      actorRole: byStudent ? studentRole : teacherRole,
+      actor: who === "student" ? student : who === "parent" ? PARENT : TEACHER,
+      actorRole: who === "student" ? studentRole : who === "parent" ? parentRole : teacherRole,
       student,
       detail,
       when: { EN: `Today, ${clock}`, DE: `Heute, ${clock}` },
@@ -125,7 +142,7 @@ function ActivityRow({ entry, language }: { entry: ActivityEntry; language: Acti
     <div className="activity-row">
       <time>{entry.when[language]}</time>
       <span className="activity-who">
-        <strong>{entry.actor}</strong>
+        <strong>{typeof entry.actor === "string" ? entry.actor : entry.actor[language]}</strong>
         <small>{entry.actorRole[language]}</small>
       </span>
       <span className={`activity-kind ${entry.kind}`}>{kindLabels[entry.kind][language]}</span>
@@ -235,8 +252,14 @@ export function RoleActivity({
 }) {
   const all = useEntries();
   const t = (en: string, de: string) => (language === "DE" ? de : en);
-  const wanted: ActivityKind = role === "student" ? "published" : "share";
-  const shown = all.filter((entry) => entry.kind === wanted && entry.student === "Khadija");
+  const wanted: ActivityKind[] = role === "student" ? ["published"] : ["share", "acknowledged"];
+  // The teacher's on/off switch is an internal audit entry; parents only see what was shared with them.
+  const shown = all.filter(
+    (entry) =>
+      wanted.includes(entry.kind) &&
+      entry.student === "Khadija" &&
+      !(role === "parent" && /turned (on|off)$/.test(entry.detail.EN)),
+  );
   return (
     <article className="card role-activity">
       <p className="kicker">

@@ -1,1 +1,10 @@
-{}
+{
+  "title": "Stepwise – AI-assisted assessment prototype",
+  "description": "HCI course prototype (CSEN 909, GUC): AI-assisted exam grading and learning-gap support for Grades 1–5, with student, teacher and parent views. Demo data only.",
+  "icons": {
+    "icon": "favicon.png"
+  },
+  "robots": {
+    "index": false
+  }
+}

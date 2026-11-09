@@ -5464,3 +5464,347 @@ label.class-picker,
     grid-template-columns: 1fr;
   }
 }
+
+/* ---------- Part D – parent view additions ---------- */
+.parent-wide {
+  grid-column: 1 / -1;
+}
+.child-switcher {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.child-switcher button {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 52px;
+  padding: 6px 16px 6px 8px;
+  text-align: left;
+  color: var(--ink);
+  background: var(--white);
+  border: 1px solid rgba(53, 67, 61, 0.3);
+  border-radius: 10px;
+}
+.child-switcher button.active {
+  background: var(--sky);
+  border-color: var(--ink);
+}
+.child-switcher strong,
+.child-switcher small {
+  display: block;
+}
+.child-avatar {
+  width: 36px;
+  height: 36px;
+  display: grid;
+  place-items: center;
+  font-weight: 700;
+  background: var(--butter);
+  border: 1px solid var(--ink);
+  border-radius: 50%;
+}
+.parent-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 6px;
+  background: var(--white);
+  border: 1px solid rgba(53, 67, 61, 0.22);
+  border-radius: 10px;
+}
+.parent-tabs button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 44px;
+  padding: 0 16px;
+  font-weight: 600;
+  color: var(--ink);
+  background: transparent;
+  border: 0;
+  border-radius: 8px;
+}
+.parent-tabs button.active {
+  background: #dbe7ec;
+  box-shadow: inset 0 -3px 0 #91aeb8;
+}
+.parent-tabs b {
+  min-width: 20px;
+  padding: 1px 6px;
+  font-size: 12px;
+  background: var(--blush);
+  border-radius: 10px;
+}
+.parent-alert {
+  display: grid;
+  grid-template-columns: 44px 1fr;
+  gap: 14px;
+  padding: 20px 22px;
+  background: #fbefef;
+}
+.parent-alert.calm {
+  background: #eef4ef;
+}
+.parent-alert-icon {
+  width: 44px;
+  height: 44px;
+  display: grid;
+  place-items: center;
+  background: var(--white);
+  border: 1px solid var(--ink);
+  border-radius: 8px;
+}
+.parent-alert h2 {
+  margin: 8px 0 6px;
+  font-size: 20px;
+}
+.parent-alert .button {
+  margin-top: 10px;
+}
+.parent-practice,
+.parent-concepts {
+  display: grid;
+  gap: 10px;
+  align-content: start;
+  padding: 20px 22px;
+}
+.parent-report {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 20px 22px;
+  background: #f6f1e8;
+}
+.parent-report ul {
+  margin: 8px 0 0;
+  padding-left: 20px;
+  line-height: 1.6;
+}
+.report-actions {
+  display: grid;
+  gap: 10px;
+  align-content: center;
+  justify-items: start;
+}
+.parent-empty {
+  display: flex;
+  gap: 14px;
+  align-items: flex-start;
+  padding: 22px;
+}
+.parent-results,
+.parent-resources {
+  display: grid;
+  gap: 14px;
+}
+.parent-results > .button {
+  justify-self: start;
+}
+.parent-result-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 20px 22px;
+  background: var(--sky);
+}
+.parent-result-head > div {
+  display: grid;
+  gap: 8px;
+}
+.parent-result-head > strong {
+  font-size: 40px;
+  white-space: nowrap;
+}
+.parent-result-head > strong small {
+  font-size: 15px;
+}
+.parent-question-list {
+  padding: 6px 22px;
+}
+.parent-question {
+  display: grid;
+  grid-template-columns: 1fr auto 56px;
+  gap: 12px;
+  align-items: center;
+  padding: 12px 0;
+  border-top: 1px solid rgba(53, 67, 61, 0.12);
+}
+.parent-question:first-child {
+  border-top: 0;
+}
+.parent-question span > * {
+  display: block;
+}
+.parent-question em {
+  margin-top: 2px;
+  font-style: normal;
+  color: #6d4c4f;
+}
+.parent-question > b {
+  text-align: right;
+}
+.parent-concept {
+  display: grid;
+  gap: 4px;
+  padding: 8px 0;
+  border-top: 1px solid rgba(53, 67, 61, 0.12);
+}
+.parent-concept > div {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+.parent-concept > span {
+  display: grid;
+  grid-template-columns: 56px 1fr 44px;
+  gap: 8px;
+  align-items: center;
+}
+.parent-concept i {
+  height: 10px;
+  overflow: hidden;
+  background: rgba(53, 67, 61, 0.1);
+  border-radius: 6px;
+}
+.parent-concept i b {
+  display: block;
+  height: 100%;
+  background: #91aeb8;
+  border-radius: inherit;
+}
+.parent-resource-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 14px;
+}
+.parent-resource-grid > .card {
+  display: grid;
+  gap: 10px;
+  align-content: start;
+  padding: 18px 20px;
+}
+.parent-resource-grid ol {
+  margin: 0;
+  padding-left: 20px;
+  line-height: 1.6;
+}
+.parent-resource-grid .button {
+  justify-self: start;
+}
+.parent-shell .explainer-video {
+  margin: 0;
+}
+.parent-shell .video-caption {
+  font-size: 16px;
+}
+.parent-chat {
+  display: grid;
+  gap: 12px;
+  padding: 20px 22px;
+}
+.parent-chat > .button {
+  justify-self: start;
+}
+.parent-field {
+  display: grid;
+  gap: 6px;
+  font-weight: 600;
+}
+.parent-field textarea,
+.parent-field select {
+  width: 100%;
+  min-height: 44px;
+  padding: 8px 10px;
+  font: inherit;
+  font-weight: 400;
+  border: 1px solid rgba(53, 67, 61, 0.45);
+  border-radius: 8px;
+  background: var(--white);
+}
+.bubble.parent {
+  justify-self: end;
+  background: #f3e3e4;
+  border: 1px solid rgba(53, 67, 61, 0.25);
+}
+.parent-chat .bubble.teacher {
+  justify-self: start;
+}
+.parent-profile {
+  display: grid;
+  gap: 10px;
+}
+.parent-profile .back-link {
+  justify-self: start;
+}
+.parent-profile-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 14px;
+}
+.parent-profile-grid > .card {
+  padding: 18px 20px;
+}
+.parent-profile dl {
+  display: grid;
+  margin: 0;
+}
+.parent-profile dl > div {
+  display: grid;
+  grid-template-columns: 140px 1fr;
+  gap: 10px;
+  padding: 10px 0;
+  border-top: 1px solid rgba(53, 67, 61, 0.12);
+}
+.parent-profile dl > div:first-child {
+  border-top: 0;
+}
+.parent-profile dt {
+  font-weight: 700;
+}
+.parent-profile dd {
+  margin: 0;
+}
+@media (max-width: 760px) {
+  .parent-wide,
+  .parent-tabs,
+  .child-switcher {
+    margin-top: 12px;
+  }
+  .parent-question {
+    grid-template-columns: 1fr auto;
+  }
+  .parent-question > b {
+    grid-column: 2;
+  }
+  .parent-profile dl > div {
+    grid-template-columns: 1fr;
+  }
+  .parent-tabs button {
+    padding: 0 10px;
+  }
+}
+.parent-result-head {
+  flex-wrap: wrap;
+}
+.parent-question > span,
+.parent-result-head > div {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+@media (max-width: 760px) {
+  .parent-result-head > strong {
+    font-size: 32px;
+  }
+  .parent-question-list,
+  .parent-result-head {
+    padding-inline: 16px;
+  }
+}
+/* Long (often German) status labels may wrap on the parent screens instead of overflowing. */
+.parent-shell .status {
+  max-width: 100%;
+  white-space: normal;
+}

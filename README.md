@@ -157,10 +157,6 @@ src/
   index.css          all styles (Tailwind v4 is set up but most styling is plain CSS)
 ```
 
-Stack: React 19, TypeScript, Vite 8. The project started in Figma Make and was then extended by hand. The `.figma/` folder is Figma Make's configuration and is not needed to run the app.
-
----
-
 ## Deployment (GitHub Pages)
 
 Every push to `main` runs [`.github/workflows/deploy.yml`](.github/workflows/deploy.yml). The workflow type-checks the code, builds it with `BASE_PATH=/stepwise_HCI/` (Pages serves the site from that sub-folder), and publishes `dist/` to https://farahsadek.github.io/stepwise_HCI/.
@@ -185,6 +181,3 @@ One-time setup in the repository: **Settings → Pages → Build and deployment 
 Basmala Mohamed · Hana Tobar · Nour Tarek · Farah Sadek · Omar Emad
 Instructor: Dr. Aya Salama · TAs: Samaa Soliman, Aml Yasser
 
-## Use of AI tools
-
-The interface was first generated with Figma Make and then developed further with an AI coding assistant (Claude Code). As the course requires, the full history of our AI chats and prompts is submitted with the milestone deliverables. The research, interview, personas, task analyses and design decisions come from the team.

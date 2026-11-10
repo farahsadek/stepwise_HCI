@@ -61,7 +61,7 @@ export function LineChart({
   useEffect(() => {
     const el = wrap.current;
     if (!el) return;
-    const update = () => setWidth(Math.max(280, Math.round(el.getBoundingClientRect().width)));
+    const update = () => setWidth(Math.max(240, Math.round(el.getBoundingClientRect().width)));
     update();
     const observer = new ResizeObserver(update);
     observer.observe(el);

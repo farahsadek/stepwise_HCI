@@ -108,7 +108,75 @@ export type Assessment = {
   language: Lang;
   marks: number;
   status: "published" | "review" | "draft";
+  /** Saved grading rules (ids) this assessment reuses. */
+  rules?: number[];
+  /** Questions entered by the teacher (new assessments). */
+  questions?: AssessmentQuestion[];
 };
+export type AssessmentQuestion = { text: string; model: string; marks: number; rule: string };
+
+// ---------------------------------------------------------------------------
+// Classes taught by Ms. Ashraf (Mathematics). Grade 4B is live (roster below);
+// 4A and 4C are summary data for the class performance overview.
+// ---------------------------------------------------------------------------
+export type ClassId = "4A" | "4B" | "4C";
+export type ClassConcept = { name: Text; students: number; mistake: Text };
+export type ClassMissed = { q: number; task: Text; wrong: number };
+export type ClassSummary = {
+  students: number;
+  /** Class average per quiz (Quiz 1–4); null = not marked yet. */
+  averages: (number | null)[];
+  marked: number;
+  concepts: ClassConcept[];
+  missed: ClassMissed[];
+  /** score null = latest quiz not marked yet. */
+  support: { name: string; focus: Text; score: number | null }[];
+};
+export const otherClasses: Record<"4A" | "4C", ClassSummary> = {
+  "4A": {
+    students: 24,
+    averages: [63, 66, 70, 74],
+    marked: 24,
+    concepts: [
+      { name: { EN: "Two-step word problems", DE: "Zweischrittige Sachaufgaben" }, students: 9, mistake: { EN: "Stops after the first step", DE: "Hört nach dem ersten Schritt auf" } },
+      { name: { EN: "Comparing fractions", DE: "Brüche vergleichen" }, students: 5, mistake: { EN: "Compares by the bottom number only", DE: "Vergleicht nur über die untere Zahl" } },
+      { name: { EN: "Showing working", DE: "Rechenweg zeigen" }, students: 4, mistake: { EN: "Writes the answer without the number sentence", DE: "Schreibt das Ergebnis ohne Rechnung" } },
+    ],
+    missed: [
+      { q: 8, task: { EN: "Bus seats word problem", DE: "Sachaufgabe Bussitze" }, wrong: 46 },
+      { q: 7, task: { EN: "Compare 2/3 and 3/5", DE: "Vergleiche 2/3 und 3/5" }, wrong: 21 },
+      { q: 5, task: { EN: "Share 20 apples", DE: "Teile 20 Äpfel" }, wrong: 17 },
+    ],
+    support: [
+      { name: "Rahma", focus: { EN: "Two-step word problems", DE: "Zweischrittige Sachaufgaben" }, score: 58 },
+      { name: "Jomana", focus: { EN: "Two-step word problems", DE: "Zweischrittige Sachaufgaben" }, score: 61 },
+      { name: "Farah", focus: { EN: "Comparing fractions", DE: "Brüche vergleichen" }, score: 64 },
+    ],
+  },
+  "4C": {
+    students: 23,
+    averages: [55, 57, 62, null],
+    marked: 0,
+    concepts: [
+      { name: { EN: "Multi-digit multiplication", DE: "Mehrstellige Multiplikation" }, students: 11, mistake: { EN: "Carrying forgotten in the tens", DE: "Übertrag bei den Zehnern vergessen" } },
+      { name: { EN: "Equal parts", DE: "Gleiche Teile" }, students: 7, mistake: { EN: "Shades unequal parts", DE: "Färbt ungleiche Teile" } },
+      { name: { EN: "Comparing fractions", DE: "Brüche vergleichen" }, students: 6, mistake: { EN: "Compares by the bottom number only", DE: "Vergleicht nur über die untere Zahl" } },
+    ],
+    missed: [
+      { q: 2, task: { EN: "Quiz 3 · 214 × 3", DE: "Quiz 3 · 214 × 3" }, wrong: 48 },
+      { q: 5, task: { EN: "Quiz 3 · Shade 2/5", DE: "Quiz 3 · Färbe 2/5" }, wrong: 30 },
+      { q: 6, task: { EN: "Quiz 3 · Compare 1/2 and 1/3", DE: "Quiz 3 · Vergleiche 1/2 und 1/3" }, wrong: 26 },
+    ],
+    support: [
+      { name: "Youssef", focus: { EN: "Multi-digit multiplication", DE: "Mehrstellige Multiplikation" }, score: 48 },
+      { name: "Hamza", focus: { EN: "Equal parts", DE: "Gleiche Teile" }, score: 52 },
+      { name: "Lojain", focus: { EN: "Multi-digit multiplication", DE: "Mehrstellige Multiplikation" }, score: 54 },
+    ],
+  },
+};
+
+/** What the teacher decided after a student's verification pop quiz. */
+export type GapOutcome = "resolved" | "again" | "group";
 
 export type RosterStudent = {
   name: string;
@@ -174,6 +242,16 @@ type ClassState = {
   parentAck: boolean;
   /** Number of messages in the parent conversation the parent has already seen. */
   parentSeen: number;
+  /** Marks set by the teacher, key "Name:question" (override, by-question edit). Win over AI and bulk rules. */
+  markEdits: Record<string, number>;
+  /** Students whose AI mark the teacher rejected (stay in the queue without a mark). */
+  rejected: string[];
+  /** Class shown on the dashboard and class performance pages. */
+  teacherClass: ClassId;
+  /** Students whose Quiz 4 paper the teacher uploaded in bulk (this session). */
+  uploadedScans: string[];
+  /** Follow-up after the verification pop quiz, per student. */
+  gapOutcome: Record<string, GapOutcome>;
 };
 
 let state: ClassState = {
@@ -186,7 +264,7 @@ let state: ClassState = {
       messages: [
         {
           from: "teacher",
-          text: "Khadija is building confidence with multiplication. Short fraction activities at home will help.",
+          text: "Khadija is getting stronger at multiplication. Short fraction activities at home will help.",
           textDe:
             "Khadija wird beim Multiplizieren sicherer. Kurze Bruchübungen zu Hause helfen ihr.",
           at: 0,
@@ -225,6 +303,11 @@ let state: ClassState = {
   shareDefault: true,
   parentAck: false,
   parentSeen: 1,
+  markEdits: {},
+  rejected: [],
+  teacherClass: "4B",
+  uploadedScans: [],
+  gapOutcome: {},
 };
 const listeners = new Set<() => void>();
 let nextId = 100;
@@ -247,13 +330,93 @@ export function useClassState() {
   );
 }
 
-/** Quiz 4 percentage for a roster student, after any approved bulk correction. */
+/** AI mark for Q7 (compare 2/3 and 3/5, 3 marks): students working on comparing fractions wrote "<". */
+export const q7AiMark = (student: RosterStudent) =>
+  student.q5.group === "missing" ? 0 : student.focus === "compare" ? 0 : 3;
+
+/** Current Q5 mark: teacher edit, else approved bulk rule, else AI mark. */
+export function q5MarkOf(student: RosterStudent, s: ClassState = state): number {
+  const edit = s.markEdits[`${student.name}:5`];
+  if (edit !== undefined) return edit;
+  return s.q5RuleApplied && student.q5.group === "noWorking" ? Math.max(2, student.q5.mark) : student.q5.mark;
+}
+/** Current Q7 mark: teacher edit, else AI mark. */
+export function q7MarkOf(student: RosterStudent, s: ClassState = state): number {
+  return s.markEdits[`${student.name}:7`] ?? q7AiMark(student);
+}
+
+/** Quiz 4 percentage for a roster student, after bulk corrections and teacher edits (1 mark = 4 %). */
 export function quiz4Percent(student: RosterStudent, s: ClassState = state): number | null {
   const base = student.quizzes[3];
   if (base === null) return null;
-  const fixed = s.q5RuleApplied && student.q5.group === "noWorking" && student.q5.mark < 2;
-  return fixed ? base + (2 - student.q5.mark) * 4 : base;
+  return base + (q5MarkOf(student, s) - student.q5.mark) * 4 + (q7MarkOf(student, s) - q7AiMark(student)) * 4;
 }
+
+// ---------------------------------------------------------------------------
+// OCR: readings the AI is unsure about, least certain first (C8 + C10)
+// ---------------------------------------------------------------------------
+export type FlaggedReading = {
+  id: string;
+  student: string;
+  q: number;
+  task: Text;
+  /** What the AI read. */
+  read: string;
+  confidence: number;
+  kind: "digit" | "symbol" | "word" | "unclear";
+  model: string;
+  /** Extra candidates for words or unreadable answers. */
+  options?: string[];
+};
+export const flaggedReadings: FlaggedReading[] = [
+  { id: "salma-q7", student: "Salma", q: 7, task: { EN: "Compare 2/3 and 3/5", DE: "Vergleiche 2/3 und 3/5" }, read: "?", confidence: 52, kind: "unclear", model: "2/3 > 3/5", options: ["2/3 < 3/5", "2/3 > 3/5"] },
+  { id: "khadija-q2", student: "Khadija", q: 2, task: { EN: "132 × 4", DE: "132 × 4" }, read: "578", confidence: 61, kind: "digit", model: "528" },
+  { id: "mariam-q5", student: "Mariam", q: 5, task: { EN: "Share 20 apples", DE: "Teile 20 Äpfel" }, read: "4 ea", confidence: 74, kind: "word", model: "4 each", options: ["4 each"] },
+  { id: "khadija-q6", student: "Khadija", q: 6, task: { EN: "450 ÷ 5", DE: "450 ÷ 5" }, read: "9O", confidence: 78, kind: "symbol", model: "90" },
+];
+
+/** Characters handwriting recognition often mixes up. */
+const confusable: Record<string, string[]> = {
+  "7": ["2", "1"], "2": ["7"], "1": ["7"], "4": ["9"], "9": ["4"], "5": ["6"], "6": ["5"], "3": ["8"], "8": ["3"],
+  "0": ["6"], O: ["0"], o: ["0"], S: ["5"], l: ["1"], I: ["1"], "<": [">"], ">": ["<"], x: ["×"], "+": ["÷"],
+};
+export type Suggestion = { value: string; reason: Text; matchesModel: boolean };
+
+/** Correction help: swap one commonly confused character at a time; answers that match the model answer first. */
+export function ocrSuggestions(item: FlaggedReading): Suggestion[] {
+  const numericModel = /^[\d\s.,]+$/.test(item.model);
+  const seen = new Set<string>([item.read]);
+  const out: Suggestion[] = [];
+  for (let i = 0; i < item.read.length; i++) {
+    for (const alt of confusable[item.read[i]] ?? []) {
+      const value = item.read.slice(0, i) + alt + item.read.slice(i + 1);
+      if (seen.has(value) || (numericModel && /[^\d\s.,]/.test(value))) continue;
+      seen.add(value);
+      out.push({
+        value,
+        matchesModel: value === item.model,
+        reason: {
+          EN: `“${item.read[i]}” read as “${alt}”`,
+          DE: `„${item.read[i]}“ als „${alt}“ gelesen`,
+        },
+      });
+    }
+  }
+  for (const value of item.options ?? []) {
+    if (seen.has(value)) continue;
+    seen.add(value);
+    out.push({
+      value,
+      matchesModel: value === item.model,
+      reason: { EN: "Likely from the scan", DE: "Wahrscheinlich laut Scan" },
+    });
+  }
+  return out.sort((a, b) => Number(b.matchesModel) - Number(a.matchesModel)).slice(0, 3);
+}
+
+/** Positions in the AI reading that are commonly confused (shown highlighted). */
+export const uncertainPositions = (read: string) =>
+  [...read].map((c, i) => (confusable[c] ? i : -1)).filter((i) => i >= 0);
 
 export function addThreadMessage(id: number, message: ThreadMessage, status: Thread["status"]) {
   updateClassState((s) => ({

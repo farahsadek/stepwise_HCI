@@ -1,5 +1,115 @@
 # Changes
 
+## 2026-11-11 (2) — Nielsen heuristics (#1, #2, #3, #5, #6, #9 + #4, #10)
+
+New file `src/heuristics.tsx`: `useEscape`, `HelpTip`, `ErrorNote`, `GradingLoader`, `ConfirmDialog`.
+No implemented feature was removed or changed in behaviour; all additions are on top.
+
+- #1 "AI is grading …" progress (spinner + progress bar + step text, role=status) the first time a
+  paper's marks open, and again when the verified answer changes. Marks step shows the AI draft total
+  (14/25 with 578, 17/25 with 528) and the confirmed total.
+- #2 Student/parent wording: "building confidence" and "visuellen Modellen" reworded; scan of all
+  student and parent screens (before/after publish, EN/DE) finds no OCR/confidence/model/flag.
+- #3 Undo in the toast for confirm, override, reject/dismiss and the red-flag confirm/dismiss/
+  postpone: restores marks, score, queue badge, ranking and decision; the activity entry stays,
+  struck through, "undone" (`markActivityUndone`). Undo toasts stay 9 s. Escape closes every dialog,
+  the drawer, the account menu and tooltips. Upload wizard: Cancel on step 1, Back on step 2;
+  pop quiz: "Previous question" (answers kept).
+- #5 Publish asks for confirmation (score, parent sharing, practice plan; Cancel / Publish). Override
+  needs a reason when the mark differs from the AI mark (reason saved in the log). Exam language must
+  be chosen before "Send to my teacher".
+- #6 Every icon-only button has aria-label + tooltip (bell, close buttons). Review screens show
+  student · quiz · question · step at the top.
+- #9 Errors say what happened and what to do, with icon + role=alert, EN/DE: student empty fields,
+  wrong PIN, empty email/password, wrong password, blurry/dark/small photo, missing exam language,
+  empty override reason, publish blocked (names the missing step, button to go there).
+- #4 One wording: parent "Teacher reviewing" → "Teacher checking"; parent tracker
+  Sent → Teacher checking → Results ready (as the student's).
+- #10 "What does this mean?" tooltips (keyboard: focus/Enter, Escape) for OCR confidence, AI
+  suggestion, red flag, attention rank, share with parent.
+- Fixed: German red-flag status showed "Flag postponed" in English.
+
+Tests: new `pw/e2e-heuristics.mjs` EN/DE 43/43; `pw/jargon.mjs` 0 hits EN/DE; `pw/iconaudit.mjs`
+27 icon-only buttons, 0 issues EN/DE; all other suites pass EN/DE (A+B 23/23 incl. language gate);
+layout scan clean.
+
+## 2026-11-11 — Questions, bulk upload, class performance, pop-quiz follow-up
+
+- C3 New assessment: questions editor (question, model answer, marks, optional partial-mark rule),
+  add/remove, "Start from Quiz 4's questions"; total marks are the sum; saving explains what is
+  missing; saved assessments show "N questions" and open to list them (Quiz 4 shows its 8).
+- C6 Bulk upload: drop zone or file picker for many scans; each file is matched to a student by the
+  name in the file name, can be changed, gets an on-device quality check (blurry/dark/small), and
+  cannot be added while unmatched. Missing papers are added (Judy), others get an extra page.
+  "Try 3 sample scans" for testing without files. Replaces the old button that always said "Judy".
+- C1/C26 Classes: the class picker works (Grade 4A, 4B, 4C). 4A/4C dashboards show their own state.
+  Class insights is now "Class performance": average and change, most misunderstood concepts (share
+  of students + common mistake), questions most often wrong, assessment trend chart, students who
+  need support, and "Compare classes" (one line per class + table). 4B figures are live.
+- C31 Pop-quiz monitoring: before practice (same skill in the last quiz) → pop quiz per student with
+  a before/after marker, change in points, class summary (completed, average before → after,
+  improved), and a next step: mark gap resolved (3/3), assign another round (2/3, notifies Khadija),
+  or add to a small group (0–1). The outcome shows on the student record.
+- Fixed: checkboxes in the new-assessment form were stretched to full width.
+
+Tests: new `pw/e2e-class.mjs` EN/DE 28/28; C 37/37 & 38/38, review 29/29, A+B, B12/13, D, fixes,
+read-aloud pass; layout scan (22 screens × 12 sizes) clean.
+
+## 2026-11-10 (8) — Teacher review: OCR alerts, shortcuts, override, by question, bulk rules
+
+- C8 OCR confidence alerts: class-wide "Text checks · least certain first" list (Salma Q7 52 %,
+  Khadija Q2 61 %, Mariam Q5 74 %, Khadija Q6 78 %) on the review page; each paper lists its
+  readings sorted by confidence with uncertain ones highlighted; "To do today" counts readings.
+- C10 correction shortcuts: Khadija has a second flagged reading (Q6 read as "9O", O/0 confusion;
+  her answer 90 and score are unchanged). Suggestions are computed from commonly confused characters
+  (7↔2/1, O↔0, 4↔9, <↔> …), the one matching the model answer first, with a warning that this is not
+  proof; the uncertain character is highlighted. Keys: Enter = verify + next flagged reading (then
+  marks), Alt+↓/↑ = next/previous flagged, Alt+1–3 = pick a suggestion; "Previous flagged" button.
+- C12 grade review: "Dismiss" is now "Reject AI mark" for every student (stays in the queue, with
+  Undo). Fixed: Override for Mariam/Salma ignored the entered mark and showed Khadija's answer; it
+  now saves the mark (out of 4 or 3), the answer, logs AI vs teacher mark, and updates percentages.
+  Salma's AI proposal follows her verified text. Help text explains confirm / override / reject.
+- C15 review by question: click any mark to change it for one student (Khadija's links to her
+  review); "Inconsistent" updates live; edited marks are marked; "Compare Qn across the class" link
+  from Mariam's and Salma's mark step.
+- C16 bulk correction: preview only lists answers still affected (manual edits excluded); Undo after
+  approving; saved rules can be ticked when creating an assessment ("Uses 2 saved rules") and the
+  scheme tab shows "Reused in …". Teacher marks and bulk corrections flow into the gradebook.
+
+Tests: new `pw/e2e-review.mjs` EN/DE 29/29; C 36/36 & 37/37 (two-reading OCR path, Alt+1);
+A+B, B12/13, D, fixes, read-aloud pass; layout scan clean.
+
+## 2026-11-10 (7) — New logo: sprout on the step
+
+- New mark (option C): two steps with a sprout growing from the top one, matching the login line
+  "Every little step helps us grow". One `LogoMark` SVG component in `src/App.tsx` replaces the old
+  three bars everywhere (login card, top bar for all roles, teacher sidebar and tablet icon rail).
+- Per role: thick outline for students, finer outline for teacher and parent; on the sage teacher
+  sidebar the mark sits on a small white tile. On the login page the leaves grow in once (off with
+  reduced motion). The word "Stepwise" stays real text; the mark is hidden from screen readers.
+- Browser tab icon: `public/favicon.png` re-drawn from the same mark (96×96, transparent).
+- Fixed (existed before): after logging in on a phone, or changing tab/page anywhere, the new page
+  opened at the old scroll position (about 500px down after login). Pages now start at the top.
+
+Tests: all suites EN/DE pass; layout scan (22 screens × 12 sizes) clean.
+
+## 2026-11-10 (6) — Responsive layout (desktop, laptop, tablet, phone)
+
+- Login: the form no longer scrolls inside its own box (keypad was cut off); it is centred in its
+  column; on wide but short screens (laptops) the keypad sits beside the username and PIN so the
+  whole form fits; the illustration stays in place while the page scrolls. Phones keep the banner.
+- Student and parent pages use more of wide screens (student up to 1480px, parent up to 1320px with
+  three card columns from 1500px); the student toolbar lines up with the content.
+- Student tab bar shares the width (overflowed on tablets); stacked icon + label from 761–960px.
+- Teacher sidebar becomes an icon rail with tooltips from 761–1180px; stat cards and tables reflow;
+  the attention table hides its header when rows stack.
+- Fixed: on phones the teacher bottom bar hid Class insights, Messages and Activity history, and the
+  student bar hid Updates and Progress; both bars now scroll sideways and keep the current tab in view.
+- Small-phone fixes (320–414px): top bar, practice status chip, review scan toolbar, chart minimum.
+
+Tests: layout scan of 22 screens × 12 sizes (1920 → 320px): no sideways scroll, no hidden inner
+scrolling, no unreachable nav items; German checked at 6 sizes. All suites pass EN/DE.
+
 ## 2026-11-10 (5) — Read aloud for teacher and parent (A4)
 
 - Read aloud was only in the student toolbar. The reader is now a shared hook (`useReadAloud` in

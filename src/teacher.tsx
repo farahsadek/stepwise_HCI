@@ -1,15 +1,29 @@
-import { useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import { LineChart, conceptColors, conceptShape } from "./charts";
 import { requestReadAloud } from "./accessibility";
 import { logActivity } from "./activity";
+import { HelpTip, useEscape } from "./heuristics";
+import { analyzePage, type PageQuality } from "./student-media";
 import { Button, Icon, Status } from "./ui";
 import {
   addThreadMessage,
+  flaggedReadings,
   newId,
+  ocrSuggestions,
+  otherClasses,
+  questionTitlesDe,
+  questions,
+  q5MarkOf,
+  q7MarkOf,
   quiz4Percent,
   roster,
   updateClassState,
   useClassState,
+  type AssessmentQuestion,
+  type ClassId,
+  type ClassSummary,
+  type FlaggedReading,
+  type GapOutcome,
   type Lang,
   type Notifier,
   type RosterStudent,
@@ -140,6 +154,7 @@ export function NoteComposer({
   ...common
 }: Common & { student: string; onClose: () => void }) {
   const t = makeT(common.language);
+  useEscape(true, onClose);
   const templates = [
     t("Great effort this week – keep going!", "Toller Einsatz diese Woche – weiter so!"),
     t(
@@ -152,7 +167,7 @@ export function NoteComposer({
   return (
     <div className="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="note-title">
       <div className="modal">
-        <button className="modal-close" onClick={onClose} aria-label={t("Close", "Schließen")}>
+        <button className="modal-close" onClick={onClose} aria-label={t("Close", "Schließen")} title={t("Close", "Schließen")}>
           <Icon name="close" />
         </button>
         <span className="modal-icon">
@@ -195,6 +210,312 @@ export function NoteComposer({
 }
 
 // ---------------------------------------------------------------------------
+// C8 + C10 – OCR confidence alerts and correction shortcuts
+// ---------------------------------------------------------------------------
+export type ReadingState = { verified: boolean; saved: string };
+
+/** Class-wide list of uncertain readings, least certain first. */
+export function OcrQueue({
+  language,
+  currentId,
+  stateOf,
+  onOpen,
+}: {
+  language: Lang;
+  currentId: string;
+  stateOf: (item: FlaggedReading) => ReadingState;
+  onOpen: (item: FlaggedReading) => void;
+}) {
+  const t = makeT(language);
+  const left = flaggedReadings.filter((item) => !stateOf(item).verified).length;
+  return (
+    <section className="panel ocr-queue" aria-label={t("Readings to check", "Zu prüfende Lesungen")}>
+      <div className="ocr-queue-head">
+        <p className="kicker">
+          {t("TEXT CHECKS · LEAST CERTAIN FIRST", "TEXTPRÜFUNG · UNSICHERSTE ZUERST")}{" "}
+          <HelpTip language={language} topic={t("OCR confidence", "OCR-Sicherheit")}>
+            {t(
+              "How sure the AI is that it read the handwriting correctly. Readings below 80% are listed here, least certain first, so you can check them before grading.",
+              "Wie sicher die KI ist, dass sie die Handschrift richtig gelesen hat. Lesungen unter 80 % stehen hier, die unsichersten zuerst, damit Sie sie vor der Bewertung prüfen.",
+            )}
+          </HelpTip>
+        </p>
+        <h2>
+          {left === 0
+            ? t("All uncertain readings are checked", "Alle unsicheren Lesungen sind geprüft")
+            : t(
+                `${left} of ${flaggedReadings.length} uncertain readings still to check`,
+                `${left} von ${flaggedReadings.length} unsicheren Lesungen noch zu prüfen`,
+              )}
+        </h2>
+      </div>
+      <ol className="ocr-queue-list">
+        {flaggedReadings.map((item) => {
+          const st = stateOf(item);
+          return (
+            <li key={item.id}>
+              <button
+                type="button"
+                className={`${item.id === currentId ? "active" : ""} ${st.verified ? "done" : ""}`}
+                aria-current={item.id === currentId ? "step" : undefined}
+                onClick={() => onOpen(item)}
+              >
+                <span className={`ocr-confidence ${item.confidence < 70 ? "low" : "mid"}`}>{item.confidence}%</span>
+                <span className="ocr-queue-who">
+                  <strong>
+                    {item.student} · {t("Q", "A")}
+                    {item.q}
+                  </strong>
+                  <small>
+                    {t("AI read", "KI las")} “{item.read}”
+                  </small>
+                </span>
+                <Status type={st.verified ? "good" : "warn"}>
+                  {st.verified ? t(`Checked: ${st.saved}`, `Geprüft: ${st.saved}`) : t("To check", "Zu prüfen")}
+                </Status>
+              </button>
+            </li>
+          );
+        })}
+      </ol>
+    </section>
+  );
+}
+
+/** One student's readings (uncertain ones highlighted, least certain first) and the correction tool. */
+export function OcrCheck({
+  language,
+  examLanguage,
+  student,
+  current,
+  value,
+  setValue,
+  stateOf,
+  onSelect,
+  onVerify,
+}: {
+  language: Lang;
+  examLanguage: Lang;
+  student: string;
+  current: FlaggedReading;
+  value: string;
+  setValue: (value: string) => void;
+  stateOf: (item: FlaggedReading) => ReadingState;
+  onSelect: (item: FlaggedReading) => void;
+  onVerify: (goNext: boolean) => void;
+}) {
+  const t = makeT(language);
+  const qp = examLanguage === "DE" ? "A" : "Q";
+  const mine = flaggedReadings.filter((item) => item.student === student);
+  const index = mine.findIndex((item) => item.id === current.id);
+  const suggestions = ocrSuggestions(current);
+  const best = suggestions[0];
+  const st = stateOf(current);
+  // Characters that differ between the AI reading and the best suggestion are highlighted.
+  const changed =
+    best && best.value.length === current.read.length
+      ? [...current.read].map((c, i) => c !== best.value[i])
+      : [...current.read].map(() => false);
+  const rows = [
+    { id: "q1", q: 1, task: "24 × 6", read: "144", confidence: 96 },
+    {
+      id: "q3",
+      q: 3,
+      task: examLanguage === "DE" ? "Färbe 3/4" : "Shade 3/4",
+      read: examLanguage === "DE" ? "2/4 gefärbt" : "2/4 shaded",
+      confidence: 89,
+    },
+    ...mine.map((item) => ({
+      id: item.id,
+      q: item.q,
+      task: item.task[examLanguage],
+      read: stateOf(item).verified ? stateOf(item).saved : item.read,
+      confidence: item.confidence,
+    })),
+  ].sort((a, b) => a.confidence - b.confidence);
+  const move = (step: number) => {
+    const next = mine[index + step];
+    if (next) onSelect(next);
+  };
+
+  // Shortcuts: Alt+↓/↑ move between flagged readings, Alt+1–3 pick a suggestion.
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (!event.altKey) return;
+      if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+        event.preventDefault();
+        move(event.key === "ArrowDown" ? 1 : -1);
+      } else if (/^[1-3]$/.test(event.key) && suggestions[Number(event.key) - 1]) {
+        event.preventDefault();
+        setValue(suggestions[Number(event.key) - 1].value);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  });
+
+  return (
+    <>
+      <div className="extracted-list">
+        {rows.map((row) => {
+          const flagged = flaggedReadings.find((item) => item.id === row.id);
+          const level = row.confidence < 70 ? "warn" : row.confidence < 90 ? "neutral" : "good";
+          const verified = flagged ? stateOf(flagged).verified : false;
+          const content = (
+            <>
+              <span>
+                {qp}
+                {row.q} · {row.task}
+              </span>
+              <strong>{row.read}</strong>
+              <Status type={verified ? "good" : level}>
+                {verified
+                  ? t("Checked by you", "Von Ihnen geprüft")
+                  : flagged
+                    ? t(`${row.confidence}% · Check answer`, `${row.confidence} % · Antwort prüfen`)
+                    : t(`${row.confidence}% confidence`, `${row.confidence} % Sicherheit`)}
+              </Status>
+            </>
+          );
+          return flagged ? (
+            <button
+              type="button"
+              key={row.id}
+              className={`low-confidence ${row.id === current.id ? "is-current" : ""}`}
+              onClick={() => onSelect(flagged)}
+              aria-current={row.id === current.id ? "true" : undefined}
+            >
+              {content}
+            </button>
+          ) : (
+            <div key={row.id}>{content}</div>
+          );
+        })}
+      </div>
+      <div className="ocr-fix">
+        <p className="ocr-flag-count">
+          {t(
+            `Flagged reading ${index + 1} of ${mine.length} for ${student}`,
+            `Markierte Lesung ${index + 1} von ${mine.length} für ${student}`,
+          )}
+        </p>
+        <p className="ocr-read-as">
+          {t("AI read", "KI las")}{" "}
+          <span className="ocr-chars">
+            {[...current.read].map((c, i) => (
+              <mark key={i} className={changed[i] ? "unsure" : ""}>
+                {c}
+              </mark>
+            ))}
+          </span>{" "}
+          <small>
+            {current.kind === "unclear"
+              ? t("The answer could not be read. Compare with the scan.", "Die Antwort war nicht lesbar. Mit dem Scan vergleichen.")
+              : best && changed.some(Boolean)
+                ? t(
+                    `The highlighted character is often confused in handwriting (${best.reason.EN}).`,
+                    `Das markierte Zeichen wird in Handschrift oft verwechselt (${best.reason.DE}).`,
+                  )
+                : t("Compare with the scan.", "Mit dem Scan vergleichen.")}
+          </small>
+        </p>
+        <label>
+          {t(
+            `Correct ${qp}${current.q} · ${current.task[examLanguage]}`,
+            `${qp}${current.q} · ${current.task[examLanguage]} korrigieren`,
+          )}
+          <input
+            value={value}
+            onChange={(event) => setValue(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") onVerify(true);
+            }}
+          />
+        </label>
+        <div className="template-chips" aria-label={t("Suggestions", "Vorschläge")}>
+          {suggestions.map((option, i) => (
+            <button
+              type="button"
+              key={option.value}
+              className={value === option.value ? "selected" : ""}
+              onClick={() => setValue(option.value)}
+            >
+              {option.value}
+              <small>
+                {option.matchesModel
+                  ? t("Suggested correction · matches model answer", "Vorgeschlagene Korrektur · wie Musterlösung")
+                  : option.reason[language]}
+                {" · "}Alt+{i + 1}
+              </small>
+            </button>
+          ))}
+          {current.read !== "?" && (
+            <button
+              type="button"
+              className={value === current.read ? "selected" : ""}
+              onClick={() => setValue(current.read)}
+            >
+              {current.read}
+              <small>{t("As read by AI", "Wie von der KI gelesen")}</small>
+            </button>
+          )}
+        </div>
+        <p className="ocr-tip">
+          <Icon name="idea" size={16} />
+          {t(
+            "A suggestion that matches the model answer is not proof. Check the scan before you verify.",
+            "Ein Vorschlag wie die Musterlösung ist kein Beweis. Prüfen Sie den Scan, bevor Sie bestätigen.",
+          )}
+        </p>
+        <p className="ocr-shortcuts">
+          <span>
+            <kbd>Enter</kbd> {t("verify and next", "prüfen und weiter")}
+          </span>
+          <span>
+            <kbd>Alt</kbd>+<kbd>↓</kbd>/<kbd>↑</kbd> {t("next / previous flagged", "nächste / vorige Markierung")}
+          </span>
+          <span>
+            <kbd>Alt</kbd>+<kbd>1</kbd>–<kbd>3</kbd> {t("pick a suggestion", "Vorschlag wählen")}
+          </span>
+        </p>
+      </div>
+      {st.verified && (
+        <div className="confirmed-box">
+          <Icon name="check" />
+          <div>
+            <strong>{t("OCR verified", "OCR geprüft")}</strong>
+            <p>
+              {t(`The flagged answer is saved as ${st.saved}.`, `Die markierte Antwort wurde als ${st.saved} gespeichert.`)}
+            </p>
+          </div>
+        </div>
+      )}
+      <div className="decision-actions">
+        {index > 0 && (
+          <Button icon="arrow" variant="ghost" className="ocr-prev" onClick={() => move(-1)}>
+            {t("Previous flagged", "Vorige Markierung")}
+          </Button>
+        )}
+        <Button icon="check" disabled={!value.trim()} onClick={() => onVerify(false)}>
+          {t("Verify OCR", "OCR prüfen")}
+        </Button>
+        <Button icon="arrow" variant="secondary" disabled={!value.trim()} onClick={() => onVerify(true)}>
+          {t("Next flagged", "Nächste Markierung")}
+        </Button>
+      </div>
+      {index === mine.length - 1 && (
+        <p className="ocr-last-note">
+          {t(
+            "This is the last flagged reading on this paper. Next is the marks step.",
+            "Das ist die letzte markierte Lesung dieser Arbeit. Danach kommt die Bewertung.",
+          )}
+        </p>
+      )}
+    </>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // C1 – Dashboard "To do today" + class picker
 // ---------------------------------------------------------------------------
 export function TodayPanel({
@@ -221,40 +542,6 @@ export function TodayPanel({
         </button>
       ))}
     </article>
-  );
-}
-
-export function ClassPicker({ language, notify }: { language: Lang; notify: (m: string) => void }) {
-  const t = makeT(language);
-  return (
-    <div className="class-picker">
-      <label>
-        {t("Class", "Klasse")}
-        <select
-          value="4B"
-          onChange={() =>
-            notify(
-              t(
-                "Demo data exists only for Grade 4B.",
-                "Demo-Daten gibt es nur für Klasse 4B.",
-              ),
-            )
-          }
-        >
-          {["4A", "4B", "4C", "4D", "4E"].map((c) => (
-            <option key={c} value={c}>
-              {t("Grade", "Klasse")} {c}
-            </option>
-          ))}
-        </select>
-      </label>
-      <label>
-        {t("Subject", "Fach")}
-        <select value="math" onChange={() => undefined}>
-          <option value="math">{t("Mathematics", "Mathematik")}</option>
-        </select>
-      </label>
-    </div>
   );
 }
 
@@ -537,6 +824,15 @@ export function StudentRecord({
                 : t("Send reminder", "Erinnerung senden")}
             </Button>
           )}
+          {s.gapOutcome[student.name] && (
+            <Status type={s.gapOutcome[student.name] === "resolved" ? "good" : "neutral"}>
+              {s.gapOutcome[student.name] === "resolved"
+                ? t("Gap resolved after the pop quiz", "Lücke nach dem Kurz-Quiz behoben")
+                : s.gapOutcome[student.name] === "again"
+                  ? t("Another practice round assigned", "Weitere Übungsrunde zugewiesen")
+                  : t("In the small-group session", "In der Kleingruppe")}
+            </Status>
+          )}
           {isKhadija && (
             <Status type={s.parentAck ? "good" : "neutral"}>
               {s.parentAck
@@ -573,8 +869,28 @@ export function AssessmentsPage({
   const s = useClassState();
   const language = common.language;
   const [tab, setTab] = useState<"list" | "scheme" | "submissions">("submissions");
-  const [form, setForm] = useState<null | { title: string; subject: string; language: Lang; marks: number; date: string }>(null);
+  const [form, setForm] = useState<null | {
+    title: string;
+    subject: string;
+    language: Lang;
+    marks: number;
+    date: string;
+    questions: AssessmentQuestion[];
+  }>(null);
+  const [formError, setFormError] = useState("");
+  const [openQuestions, setOpenQuestions] = useState<number | null>(null);
+  const blankQuestion = (): AssessmentQuestion => ({ text: "", model: "", marks: 2, rule: "" });
+  const quiz4Questions = (): AssessmentQuestion[] =>
+    s.scheme.map((item, i) => ({
+      text: language === "DE" ? questionTitlesDe[i] : questions[i].title,
+      model: item.model,
+      marks: item.marks,
+      rule: item.rule[language],
+    }));
+  const questionsOf = (item: (typeof s.assessments)[number]) =>
+    item.questions ?? (item.id === 4 ? quiz4Questions() : undefined);
   const [modelFile, setModelFile] = useState<string | null>(null);
+  const [useRules, setUseRules] = useState<number[] | null>(null);
   const status = (student: RosterStudent) => {
     if (student.name === "Khadija") {
       if (!khadija.ocrVerified) return { type: "warn" as const, label: t("Check extracted text", "Erkannten Text prüfen"), action: true };
@@ -605,7 +921,8 @@ export function AssessmentsPage({
           icon="edit"
           onClick={() => {
             setTab("list");
-            setForm({ title: "", subject: "math", language: "EN", marks: 25, date: "" });
+            setForm({ title: "", subject: "math", language: "EN", marks: 25, date: "", questions: [blankQuestion()] });
+            setFormError("");
           }}
         >
           {t("New assessment", "Neue Prüfung")}
@@ -638,38 +955,8 @@ export function AssessmentsPage({
                 )}
               </h2>
             </div>
-            <label className="button secondary file-choice">
-              <Icon name="book" />
-              {t("Upload paper scans", "Scans hochladen")}
-              <input
-                type="file"
-                multiple
-                accept="image/*,application/pdf"
-                onChange={(e) => {
-                  const count = e.target.files?.length ?? 0;
-                  e.target.value = "";
-                  if (!count) return;
-                  updateClassState({ bulkUploaded: true });
-                  logActivity("submitted", "Judy", {
-                    EN: `Quiz 4 paper uploaded by the teacher (${count} ${count === 1 ? "file" : "files"})`,
-                    DE: `Quiz-4-Arbeit von der Lehrerin hochgeladen (${count} ${count === 1 ? "Datei" : "Dateien"})`,
-                  });
-                  common.notify(
-                    t(
-                      `${count} ${count === 1 ? "file" : "files"} uploaded and matched to Judy by name.`,
-                      `${count} ${count === 1 ? "Datei" : "Dateien"} hochgeladen und Judy anhand des Namens zugeordnet.`,
-                    ),
-                  );
-                }}
-              />
-            </label>
           </div>
-          <p className="panel-note">
-            {t(
-              "Upload several scanned papers at once. Names on the papers are matched to the class list; you check the match during text verification.",
-              "Laden Sie mehrere Scans auf einmal hoch. Die Namen werden der Klassenliste zugeordnet; Sie prüfen die Zuordnung bei der Textprüfung.",
-            )}
-          </p>
+          <BulkUpload {...common} />
           <div className="roster-table" role="table">
             {roster.map((student) => {
               const st = status(student);
@@ -681,6 +968,9 @@ export function AssessmentsPage({
                   </span>
                   <span>
                     <Status type={st.type}>{st.label}</Status>
+                    {s.uploadedScans.includes(student.name) && student.name !== "Judy" && (
+                      <small className="uses-rules">{t("Extra page uploaded by you", "Zusätzliche Seite von Ihnen hochgeladen")}</small>
+                    )}
                   </span>
                   <span>
                     {st.action && (
@@ -745,11 +1035,20 @@ export function AssessmentsPage({
             ))}
           </div>
           <h3 className="record-sub">{t("Saved grading rules", "Gespeicherte Bewertungsregeln")}</h3>
-          {s.savedRules.map((rule) => (
-            <p className="saved-rule" key={rule.id}>
-              <Icon name="check" size={16} /> <b>{rule.scope[language]}:</b> {rule.text[language]}
-            </p>
-          ))}
+          {s.savedRules.map((rule) => {
+            const usedIn = s.assessments.filter((a) => a.rules?.includes(rule.id));
+            return (
+              <p className="saved-rule" key={rule.id}>
+                <Icon name="check" size={16} /> <b>{rule.scope[language]}:</b> {rule.text[language]}
+                {usedIn.length > 0 && (
+                  <small>
+                    {" "}
+                    · {t("Reused in", "Wiederverwendet in")} {usedIn.map((a) => a.title[language]).join(", ")}
+                  </small>
+                )}
+              </p>
+            );
+          })}
         </div>
       )}
 
@@ -761,6 +1060,26 @@ export function AssessmentsPage({
               onSubmit={(e) => {
                 e.preventDefault();
                 if (!form.title.trim()) return;
+                const complete = form.questions.filter((q) => q.text.trim() && q.model.trim() && q.marks > 0);
+                if (complete.length === 0) {
+                  setFormError(
+                    t(
+                      "Add at least one question with a model answer and marks.",
+                      "Fügen Sie mindestens eine Aufgabe mit Musterlösung und Punkten hinzu.",
+                    ),
+                  );
+                  return;
+                }
+                if (complete.length < form.questions.length) {
+                  setFormError(
+                    t(
+                      "Some questions are missing a question, model answer or marks. Complete or remove them.",
+                      "Bei einigen Aufgaben fehlen Aufgabe, Musterlösung oder Punkte. Ergänzen oder entfernen Sie sie.",
+                    ),
+                  );
+                  return;
+                }
+                setFormError("");
                 const subject =
                   form.subject === "math"
                     ? { EN: "Mathematics", DE: "Mathematik" }
@@ -774,14 +1093,17 @@ export function AssessmentsPage({
                       subject,
                       date: { EN: form.date || "—", DE: form.date || "—" },
                       language: form.language,
-                      marks: form.marks,
+                      marks: complete.reduce((sum, q) => sum + q.marks, 0),
                       status: "draft",
+                      questions: complete,
+                      rules: useRules ?? st.savedRules.map((r) => r.id),
                     },
                   ],
                 }));
                 common.notify(t("Assessment saved as a draft.", "Prüfung als Entwurf gespeichert."));
                 setForm(null);
                 setModelFile(null);
+                setUseRules(null);
               }}
             >
               <h2>{t("New assessment", "Neue Prüfung")}</h2>
@@ -808,16 +1130,18 @@ export function AssessmentsPage({
                   <option value="DE">Deutsch</option>
                 </select>
               </label>
-              <label>
-                {t("Total marks", "Gesamtpunkte")}
-                <input
-                  type="number"
-                  min={1}
-                  max={100}
-                  value={form.marks}
-                  onChange={(e) => setForm({ ...form, marks: Number(e.target.value) || 1 })}
-                />
-              </label>
+              <div className="form-field">
+                <span>{t("Total marks", "Gesamtpunkte")}</span>
+                <output className="marks-total">
+                  {form.questions.reduce((sum, q) => sum + (q.marks || 0), 0)}{" "}
+                  <small>
+                    {t(
+                      `from ${form.questions.length} ${form.questions.length === 1 ? "question" : "questions"}`,
+                      `aus ${form.questions.length} ${form.questions.length === 1 ? "Aufgabe" : "Aufgaben"}`,
+                    )}
+                  </small>
+                </output>
+              </div>
               <label>
                 {t("Date", "Datum")}
                 <input type="date" value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value })} />
@@ -834,6 +1158,100 @@ export function AssessmentsPage({
                   />
                 </label>
               </div>
+              <fieldset className="question-editor">
+                <legend>{t("Questions and model answers", "Aufgaben und Musterlösungen")}</legend>
+                <div className="question-head" aria-hidden="true">
+                  <span>#</span>
+                  <span>{t("Question", "Aufgabe")}</span>
+                  <span>{t("Model answer", "Musterlösung")}</span>
+                  <span>{t("Marks", "Punkte")}</span>
+                  <span>{t("Partial-mark rule (optional)", "Teilpunkt-Regel (optional)")}</span>
+                  <span />
+                </div>
+                {form.questions.map((q, i) => {
+                  const update = (patch: Partial<AssessmentQuestion>) =>
+                    setForm({ ...form, questions: form.questions.map((x, j) => (j === i ? { ...x, ...patch } : x)) });
+                  return (
+                    <div className="question-row" key={i}>
+                      <span className="question-n">
+                        {t("Q", "A")}
+                        {i + 1}
+                      </span>
+                      <input
+                        aria-label={t(`Question ${i + 1}`, `Aufgabe ${i + 1}`)}
+                        placeholder={t("e.g. 3 m = ? cm", "z. B. 3 m = ? cm")}
+                        value={q.text}
+                        onChange={(e) => update({ text: e.target.value })}
+                      />
+                      <input
+                        aria-label={t(`Model answer for question ${i + 1}`, `Musterlösung für Aufgabe ${i + 1}`)}
+                        placeholder={t("e.g. 300 cm", "z. B. 300 cm")}
+                        value={q.model}
+                        onChange={(e) => update({ model: e.target.value })}
+                      />
+                      <input
+                        type="number"
+                        min={1}
+                        max={20}
+                        aria-label={t(`Marks for question ${i + 1}`, `Punkte für Aufgabe ${i + 1}`)}
+                        value={q.marks}
+                        onChange={(e) => update({ marks: Math.max(0, Number(e.target.value) || 0) })}
+                      />
+                      <input
+                        aria-label={t(`Partial-mark rule for question ${i + 1}`, `Teilpunkt-Regel für Aufgabe ${i + 1}`)}
+                        placeholder={t("e.g. 1 for method, 1 for answer", "z. B. 1 für Rechenweg, 1 für Ergebnis")}
+                        value={q.rule}
+                        onChange={(e) => update({ rule: e.target.value })}
+                      />
+                      <button
+                        type="button"
+                        className="icon-button"
+                        disabled={form.questions.length === 1}
+                        aria-label={t(`Remove question ${i + 1}`, `Aufgabe ${i + 1} entfernen`)}
+                        onClick={() => setForm({ ...form, questions: form.questions.filter((_, j) => j !== i) })}
+                      >
+                        <Icon name="close" size={16} />
+                      </button>
+                    </div>
+                  );
+                })}
+                <div className="question-actions">
+                  <Button icon="edit" variant="secondary" onClick={() => setForm({ ...form, questions: [...form.questions, blankQuestion()] })}>
+                    {t("Add question", "Aufgabe hinzufügen")}
+                  </Button>
+                  <Button icon="book" variant="ghost" onClick={() => setForm({ ...form, questions: quiz4Questions() })}>
+                    {t("Start from Quiz 4's questions", "Mit den Aufgaben aus Quiz 4 beginnen")}
+                  </Button>
+                </div>
+              </fieldset>
+              {formError && (
+                <p className="form-error" role="alert">
+                  <Icon name="warning" size={16} /> {formError}
+                </p>
+              )}
+              <fieldset className="rule-picker">
+                <legend>{t("Reuse saved grading rules", "Gespeicherte Bewertungsregeln wiederverwenden")}</legend>
+                {s.savedRules.map((rule) => {
+                  const chosen = useRules ?? s.savedRules.map((r) => r.id);
+                  return (
+                    <label key={rule.id} className="share-toggle">
+                      <input
+                        type="checkbox"
+                        checked={chosen.includes(rule.id)}
+                        onChange={(e) =>
+                          setUseRules(e.target.checked ? [...chosen, rule.id] : chosen.filter((id) => id !== rule.id))
+                        }
+                      />
+                      <span>
+                        <strong>{rule.text[language]}</strong>
+                        <small>
+                          {t("Saved from", "Gespeichert aus")}: {rule.scope[language]}
+                        </small>
+                      </span>
+                    </label>
+                  );
+                })}
+              </fieldset>
               <div className="modal-actions">
                 <Button icon="close" variant="ghost" onClick={() => setForm(null)}>
                   {t("Cancel", "Abbrechen")}
@@ -847,13 +1265,32 @@ export function AssessmentsPage({
           )}
           <div className="roster-table" role="table">
             {s.assessments.map((item) => (
-              <div className="roster-row assessment-row" role="row" key={item.id}>
+              <Fragment key={item.id}>
+              <div className="roster-row assessment-row" role="row">
                 <strong>{item.title[language]}</strong>
                 <span>
                   {item.subject[language]} · {item.date[language]}
                 </span>
                 <span>
+                  {questionsOf(item) ? (
+                    <button
+                      type="button"
+                      className="link-button questions-toggle"
+                      aria-expanded={openQuestions === item.id}
+                      onClick={() => setOpenQuestions(openQuestions === item.id ? null : item.id)}
+                    >
+                      {t(`${questionsOf(item)!.length} questions`, `${questionsOf(item)!.length} Aufgaben`)}
+                    </button>
+                  ) : null}{" "}
                   {item.marks} {t("marks", "Punkte")} · {item.language === "DE" ? "Deutsch" : t("English", "Englisch")}
+                  {item.rules && item.rules.length > 0 && (
+                    <small className="uses-rules">
+                      {t(
+                        `Uses ${item.rules.length} saved ${item.rules.length === 1 ? "rule" : "rules"}`,
+                        `Nutzt ${item.rules.length} gespeicherte ${item.rules.length === 1 ? "Regel" : "Regeln"}`,
+                      )}
+                    </small>
+                  )}
                 </span>
                 <Status type={item.status === "published" ? "good" : item.status === "review" ? "warn" : "neutral"}>
                   {item.status === "published"
@@ -863,6 +1300,23 @@ export function AssessmentsPage({
                       : t("Draft", "Entwurf")}
                 </Status>
               </div>
+                {openQuestions === item.id && questionsOf(item) && (
+                  <ol className="assessment-questions">
+                    {questionsOf(item)!.map((q, i) => (
+                      <li key={i}>
+                        <strong>{q.text}</strong>
+                        <span>
+                          {t("Model answer", "Musterlösung")}: {q.model}
+                        </span>
+                        <span>
+                          {q.marks} {t("marks", "Punkte")}
+                          {q.rule ? ` · ${q.rule}` : ""}
+                        </span>
+                      </li>
+                    ))}
+                  </ol>
+                )}
+              </Fragment>
             ))}
           </div>
         </div>
@@ -874,51 +1328,77 @@ export function AssessmentsPage({
 // ---------------------------------------------------------------------------
 // C15 + C16 – Review one question across all students, bulk correction
 // ---------------------------------------------------------------------------
-export function QuestionReview(common: Common) {
+export function QuestionReview({
+  initialQuestion = 5,
+  onOpenReview,
+  ...common
+}: Common & { initialQuestion?: 5 | 7; onOpenReview: (name: string) => void }) {
   const t = makeT(common.language);
   const s = useClassState();
-  const [question, setQuestion] = useState<5 | 7>(5);
+  const [question, setQuestion] = useState<5 | 7>(initialQuestion);
   const [saveRule, setSaveRule] = useState(true);
-  const markOf = (student: RosterStudent) =>
-    s.q5RuleApplied && student.q5.group === "noWorking" ? Math.max(2, student.q5.mark) : student.q5.mark;
+  const [editing, setEditing] = useState<string | null>(null);
+  const [lastBulk, setLastBulk] = useState<{ ruleId: number | null; names: string[] } | null>(null);
+  const qp = t("Q", "A");
+  const markOf = (student: RosterStudent) => (question === 5 ? q5MarkOf(student, s) : q7MarkOf(student, s));
   const groups =
     question === 5
       ? [
           { id: "working", answer: t("4 each, with 20 ÷ 5 = 4", "je 4, mit 20 ÷ 5 = 4"), out: 4 },
           { id: "noWorking", answer: t("4 each, no working", "je 4, ohne Rechenweg"), out: 4 },
           { id: "wrong", answer: t("5 each", "je 5"), out: 4 },
-        ].map((g) => ({
-          ...g,
-          students: roster.filter((r) => r.q5.group === g.id).map((r) => ({ name: r.name, mark: markOf(r) })),
-        }))
+        ].map((g) => ({ ...g, students: roster.filter((r) => r.q5.group === g.id) }))
       : [
           {
             id: "right",
             answer: "2/3 > 3/5",
             out: 3,
-            students: roster
-              .filter((r) => r.focus !== "compare" && r.name !== "Judy")
-              .map((r) => ({ name: r.name, mark: 3 })),
+            students: roster.filter((r) => r.focus !== "compare" && r.q5.group !== "missing"),
           },
-          {
-            id: "wrong",
-            answer: "2/3 < 3/5",
-            out: 3,
-            students: roster.filter((r) => r.focus === "compare").map((r) => ({ name: r.name, mark: 0 })),
-          },
+          { id: "wrong", answer: "2/3 < 3/5", out: 3, students: roster.filter((r) => r.focus === "compare") },
         ];
-  const affected = roster.filter((r) => r.q5.group === "noWorking" && r.q5.mark < 2);
+  // Answers the suggested rule would still change (teacher edits are left alone).
+  const affected = roster.filter(
+    (r) => r.q5.group === "noWorking" && s.markEdits[`${r.name}:5`] === undefined && r.q5.mark < 2,
+  );
+  const setMark = (student: RosterStudent, mark: number, out: number) => {
+    const before = markOf(student);
+    setEditing(null);
+    if (mark === before) return;
+    updateClassState((st) => ({ markEdits: { ...st.markEdits, [`${student.name}:${question}`]: mark } }));
+    logActivity("override", student.name, {
+      EN: `Quiz 4 · Q${question}: mark changed ${before}/${out} → ${mark}/${out} (review by question)`,
+      DE: `Quiz 4 · A${question}: Bewertung geändert ${before}/${out} → ${mark}/${out} (Prüfung nach Aufgabe)`,
+    });
+    common.notify(
+      t(
+        `${student.name}’s ${qp}${question} mark changed to ${mark}/${out}.`,
+        `${student.name}: ${qp}${question} auf ${mark}/${out} geändert.`,
+      ),
+    );
+  };
   return (
     <section>
       <div className="teacher-heading">
         <div>
           <p className="kicker">{t("GRADING CONSISTENCY · QUIZ 4", "EINHEITLICHE BEWERTUNG · QUIZ 4")}</p>
           <h1>{t("Review by question", "Nach Aufgabe prüfen")}</h1>
-          <p>{t("Compare how the same answer was marked for every student.", "Vergleichen Sie, wie dieselbe Antwort bei allen Kindern bewertet wurde.")}</p>
+          <p>
+            {t(
+              "Compare how the same answer was marked for every student. Click a mark to change it.",
+              "Vergleichen Sie, wie dieselbe Antwort bei allen Kindern bewertet wurde. Klicken Sie auf eine Bewertung, um sie zu ändern.",
+            )}
+          </p>
         </div>
         <label className="class-picker">
           {t("Question", "Aufgabe")}
-          <select value={question} onChange={(e) => setQuestion(Number(e.target.value) as 5 | 7)}>
+          <select
+            value={question}
+            onChange={(e) => {
+              setQuestion(Number(e.target.value) as 5 | 7);
+              setEditing(null);
+            }}
+          >
             <option value={5}>{t("Q5 · Share 20 apples (4 marks)", "A5 · Teile 20 Äpfel (4 Punkte)")}</option>
             <option value={7}>{t("Q7 · Compare 2/3 and 3/5 (3 marks)", "A7 · Vergleiche 2/3 und 3/5 (3 Punkte)")}</option>
           </select>
@@ -926,8 +1406,11 @@ export function QuestionReview(common: Common) {
       </div>
       <div className="group-list">
         {groups.map((group) => {
-          const marks = [...new Set(group.students.map((x) => x.mark))];
-          const inconsistent = marks.length > 1;
+          const marks = group.students.map(markOf);
+          const distinct = [...new Set(marks)];
+          const inconsistent = distinct.length > 1;
+          // The most common mark in the group is the reference; others are highlighted.
+          const usual = distinct.sort((a, b) => marks.filter((m) => m === b).length - marks.filter((m) => m === a).length)[0];
           return (
             <article className={`panel answer-group ${inconsistent ? "inconsistent" : ""}`} key={group.id}>
               <div className="panel-head">
@@ -944,11 +1427,54 @@ export function QuestionReview(common: Common) {
                 )}
               </div>
               <div className="group-students">
-                {group.students.map((x) => (
-                  <span key={x.name} className={inconsistent && x.mark !== Math.max(...marks) ? "odd" : ""}>
-                    {x.name} <b>{x.mark}/{group.out}</b>
-                  </span>
-                ))}
+                {group.students.map((student) => {
+                  const mark = markOf(student);
+                  const edited = s.markEdits[`${student.name}:${question}`] !== undefined;
+                  const odd = inconsistent && mark !== usual;
+                  if (editing === student.name)
+                    return (
+                      <label className="mark-edit" key={student.name}>
+                        {student.name}
+                        <select
+                          autoFocus
+                          aria-label={t(`New mark for ${student.name}`, `Neue Bewertung für ${student.name}`)}
+                          value={mark}
+                          onChange={(e) => setMark(student, Number(e.target.value), group.out)}
+                          onBlur={() => setEditing(null)}
+                          onKeyDown={(e) => e.key === "Escape" && setEditing(null)}
+                        >
+                          {Array.from({ length: group.out + 1 }, (_, i) => (
+                            <option key={i} value={group.out - i}>
+                              {group.out - i}/{group.out}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                    );
+                  return (
+                    <button
+                      type="button"
+                      key={student.name}
+                      className={`mark-chip ${odd ? "odd" : ""} ${edited ? "edited" : ""}`}
+                      title={
+                        student.name === "Khadija"
+                          ? t("Khadija’s marks are set in her review", "Khadijas Bewertung wird in ihrer Prüfung festgelegt")
+                          : t("Change this mark", "Bewertung ändern")
+                      }
+                      onClick={() => (student.name === "Khadija" ? onOpenReview("Khadija") : setEditing(student.name))}
+                    >
+                      {student.name}{" "}
+                      <b>
+                        {mark}/{group.out}
+                      </b>
+                      {student.name === "Khadija" ? (
+                        <Icon name="lock" size={13} />
+                      ) : edited ? (
+                        <small>{t("edited", "geändert")}</small>
+                      ) : null}
+                    </button>
+                  );
+                })}
               </div>
             </article>
           );
@@ -970,36 +1496,83 @@ export function QuestionReview(common: Common) {
               <Icon name="check" />
               <div>
                 <strong>{t("Correction applied", "Korrektur angewendet")}</strong>
-                <p>{t("All “4 each, no working” answers now have 2 of 4 marks.", "Alle Antworten „je 4, ohne Rechenweg“ haben jetzt 2 von 4 Punkten.")}</p>
+                <p>
+                  {t(
+                    "All “4 each, no working” answers now have 2 of 4 marks, unless you changed a mark yourself.",
+                    "Alle Antworten „je 4, ohne Rechenweg“ haben jetzt 2 von 4 Punkten, außer Sie haben eine Bewertung selbst geändert.",
+                  )}
+                </p>
+                <Button
+                  icon="close"
+                  variant="ghost"
+                  onClick={() => {
+                    const undo = lastBulk;
+                    updateClassState((st) => ({
+                      q5RuleApplied: false,
+                      savedRules: undo?.ruleId ? st.savedRules.filter((r) => r.id !== undo.ruleId) : st.savedRules,
+                    }));
+                    (undo?.names ?? []).forEach((name) =>
+                      logActivity("override", name, {
+                        EN: "Quiz 4 · Q5: bulk correction undone",
+                        DE: "Quiz 4 · A5: Sammelkorrektur rückgängig gemacht",
+                      }),
+                    );
+                    setLastBulk(null);
+                    common.notify(t("Bulk correction undone.", "Sammelkorrektur rückgängig gemacht."));
+                  }}
+                >
+                  {t("Undo correction", "Korrektur rückgängig machen")}
+                </Button>
               </div>
             </div>
+          ) : affected.length === 0 ? (
+            <p>{t("No answers need this correction any more.", "Keine Antwort braucht diese Korrektur mehr.")}</p>
           ) : (
             <>
-              <p>{t("Preview – these marks will change:", "Vorschau – diese Bewertungen ändern sich:")}</p>
+              <p>
+                {affected.length === 1
+                  ? t(
+                      "The AI found 1 similar answer marked lower. Preview – this mark will change:",
+                      "Die KI hat 1 ähnliche, niedriger bewertete Antwort gefunden. Vorschau – diese Bewertung ändert sich:",
+                    )
+                  : t(
+                      `The AI found ${affected.length} similar answers marked lower. Preview – these marks will change:`,
+                      `Die KI hat ${affected.length} ähnliche, niedriger bewertete Antworten gefunden. Vorschau – diese Bewertungen ändern sich:`,
+                    )}
+              </p>
               <div className="group-students">
-                {affected.map((r) => (
-                  <span key={r.name}>
-                    {r.name} <b>{r.q5.mark}/4 → 2/4</b> ({quiz4Percent(r, s)}% → {(r.quizzes[3] ?? 0) + (2 - r.q5.mark) * 4}%)
-                  </span>
-                ))}
+                {affected.map((r) => {
+                  const now = quiz4Percent(r, s) ?? 0;
+                  return (
+                    <span key={r.name}>
+                      {r.name} <b>{q5MarkOf(r, s)}/4 → 2/4</b> ({now}% → {now + (2 - q5MarkOf(r, s)) * 4}%)
+                    </span>
+                  );
+                })}
               </div>
               <label className="share-toggle">
                 <input type="checkbox" checked={saveRule} onChange={(e) => setSaveRule(e.target.checked)} />
                 <span>
                   <strong>{t("Save this rule for future assessments", "Regel für künftige Prüfungen speichern")}</strong>
-                  <small>{t("The AI will apply it to similar word problems.", "Die KI wendet sie auf ähnliche Sachaufgaben an.")}</small>
+                  <small>
+                    {t(
+                      "You can choose it when you create a new assessment.",
+                      "Sie können sie beim Anlegen einer neuen Prüfung auswählen.",
+                    )}
+                  </small>
                 </span>
               </label>
               <Button
                 icon="check"
                 onClick={() => {
+                  const ruleId = saveRule ? newId() : null;
                   updateClassState((st) => ({
                     q5RuleApplied: true,
-                    savedRules: saveRule
+                    savedRules: ruleId
                       ? [
                           ...st.savedRules,
                           {
-                            id: newId(),
+                            id: ruleId,
                             scope: { EN: "Word problems", DE: "Sachaufgaben" },
                             text: {
                               EN: "Correct answer without working = half marks",
@@ -1009,6 +1582,7 @@ export function QuestionReview(common: Common) {
                         ]
                       : st.savedRules,
                   }));
+                  setLastBulk({ ruleId, names: affected.map((r) => r.name) });
                   affected.forEach((r) =>
                     logActivity("override", r.name, {
                       EN: `Quiz 4 · Q5: bulk correction ${r.q5.mark}/4 → 2/4 (no working rule)`,
@@ -1023,7 +1597,9 @@ export function QuestionReview(common: Common) {
                   );
                 }}
               >
-                {t(`Approve for ${affected.length} answers`, `Für ${affected.length} Antworten freigeben`)}
+                {affected.length === 1
+                  ? t("Approve for 1 answer", "Für 1 Antwort freigeben")
+                  : t(`Approve for ${affected.length} answers`, `Für ${affected.length} Antworten freigeben`)}
               </Button>
             </>
           )}
@@ -1282,60 +1858,6 @@ export function SkillTree({ onOpenStudent, ...common }: Common & { onOpenStudent
 // ---------------------------------------------------------------------------
 // C31 – Practice and pop-quiz monitoring
 // ---------------------------------------------------------------------------
-export function QuizMonitor({ khadija, ...common }: Common & Live) {
-  const t = makeT(common.language);
-  const s = useClassState();
-  const rows = roster
-    .filter((r) => r.practice !== "none" || r.name === "Khadija")
-    .map((r) => {
-      if (r.name !== "Khadija") return { name: r.name, state: r.practice, score: r.quizScore };
-      const state = khadija.practiced
-        ? "done"
-        : khadija.published && khadija.redFlagDecision === "confirmed"
-          ? "pending"
-          : "none";
-      return { name: r.name, state, score: khadija.practiceScore ?? undefined };
-    });
-  return (
-    <section className="panel students-panel quiz-monitor">
-      <div className="panel-head">
-        <div>
-          <p className="kicker">{t("VERIFICATION POP QUIZZES", "KURZ-QUIZZE ZUR KONTROLLE")}</p>
-          <h2>{t("Practice follow-up", "Nachverfolgung der Übungen")}</h2>
-        </div>
-      </div>
-      {rows.map((row) => (
-        <div className="student-snapshot" key={row.name}>
-          <span className="student-cell">
-            <b>{initials(row.name)}</b>
-            <i>
-              <strong>{row.name}</strong>
-              <small>{t("Comparing fractions practice", "Übung Brüche vergleichen")}</small>
-            </i>
-          </span>
-          <strong>{row.state === "done" ? `${row.score}/3` : "—"}</strong>
-          <Status type={row.state === "done" ? (row.score === 3 ? "good" : "neutral") : row.state === "pending" ? "warn" : "neutral"}>
-            {row.state === "done"
-              ? row.score === 3
-                ? t("Understood", "Verstanden")
-                : t("Partly understood", "Teilweise verstanden")
-              : row.state === "pending"
-                ? t("Not done yet", "Noch nicht erledigt")
-                : t("Not assigned yet", "Noch nicht zugewiesen")}
-          </Status>
-          {row.state === "pending" ? (
-            <Button icon="bell" variant="ghost" onClick={() => sendPracticeReminder(row.name, common)}>
-              {s.remindersSent.includes(row.name) ? t("Remind again", "Erneut erinnern") : t("Send reminder", "Erinnern")}
-            </Button>
-          ) : (
-            <span />
-          )}
-        </div>
-      ))}
-    </section>
-  );
-}
-
 // ---------------------------------------------------------------------------
 // C30 – Approve, replace or assign learning resources (shown with the red flag)
 // ---------------------------------------------------------------------------
@@ -1662,6 +2184,15 @@ export function GradeBreakdown({
     <div className="grade-breakdown">
       <p className="kicker">{t("WHOLE EXAM · AI MARKS", "GANZE ARBEIT · KI-BEWERTUNG")}</p>
       <h3>{t("Least certain first", "Unsicherste zuerst")}</h3>
+      <p className="breakdown-total">
+        {(() => {
+          const total = marks.reduce((sum, m) => sum + m, 0);
+          const pct = Math.round((total / 25) * 100);
+          return q2Confirmed
+            ? t(`Total ${total}/25 (${pct}%) · confirmed by you`, `Summe ${total}/25 (${pct} %) · von Ihnen bestätigt`)
+            : t(`AI draft total ${total}/25 (${pct}%) · not confirmed yet`, `KI-Entwurf gesamt ${total}/25 (${pct} %) · noch nicht bestätigt`);
+        })()}
+      </p>
       <div className="breakdown-table" role="table">
         {rows.map((row) => {
           const level = row.confidence < 70 ? "warn" : row.confidence < 90 ? "neutral" : "good";
@@ -1744,3 +2275,802 @@ export function GradeBreakdown({
     </div>
   );
 }
+
+// ---------------------------------------------------------------------------
+// C1 + C26 – Classes: picker, class performance overview, class comparison
+// ---------------------------------------------------------------------------
+const classIds: ClassId[] = ["4A", "4B", "4C"];
+
+/** Grade 4B summary, calculated from the live roster and review state. */
+export function summary4B(khadija: KhadijaLive, s: ReturnType<typeof useClassState>): ClassSummary {
+  const marked = roster.filter((r) => r.q5.group !== "missing");
+  const q4 = marked
+    .map((r) => (r.name === "Khadija" ? khadija.percent : quiz4Percent(r, s)))
+    .filter((v): v is number => v !== null);
+  const average = q4.length ? Math.round(q4.reduce((a, b) => a + b, 0) / q4.length) : null;
+  const pct = (n: number) => Math.round((n / marked.length) * 100);
+  const concepts = skills
+    .map((k) => ({ name: k.name, students: studentsFor(k.id).length, mistake: k.mistake }))
+    .sort((a, b) => b.students - a.students)
+    .slice(0, 3);
+  const support = marked
+    .filter((r) => r.focus)
+    .map((r) => ({
+      name: r.name,
+      focus: skills.find((k) => k.id === r.focus)?.name ?? { EN: "", DE: "" },
+      score: r.name === "Khadija" ? khadija.percent : quiz4Percent(r, s),
+    }))
+    .sort((a, b) => (a.score ?? 999) - (b.score ?? 999))
+    .slice(0, 5);
+  return {
+    students: roster.length,
+    averages: [59, 64, 67, average],
+    marked: 18 + (khadija.awardedMark !== null ? 1 : 0) + s.otherReviewed.length,
+    concepts,
+    missed: [
+      { q: 7, task: { EN: "Compare 2/3 and 3/5", DE: "Vergleiche 2/3 und 3/5" }, wrong: pct(marked.filter((r) => q7MarkOf(r, s) < 3).length) },
+      { q: 5, task: { EN: "Share 20 apples", DE: "Teile 20 Äpfel" }, wrong: pct(marked.filter((r) => q5MarkOf(r, s) < 4).length) },
+      { q: 3, task: { EN: "Shade 3/4", DE: "Färbe 3/4" }, wrong: pct(studentsFor("parts").length) },
+    ].sort((a, b) => b.wrong - a.wrong),
+    support,
+  };
+}
+
+export function ClassPicker({ language }: { language: Lang; notify?: (m: string) => void }) {
+  const t = makeT(language);
+  const s = useClassState();
+  return (
+    <div className="class-picker">
+      <label>
+        {t("Class", "Klasse")}
+        <select
+          value={s.teacherClass}
+          onChange={(e) => updateClassState({ teacherClass: e.target.value as ClassId })}
+        >
+          {classIds.map((c) => (
+            <option key={c} value={c}>
+              {t("Grade", "Klasse")} {c}
+            </option>
+          ))}
+        </select>
+      </label>
+      <label>
+        {t("Subject", "Fach")}
+        <select value="math" onChange={() => undefined}>
+          <option value="math">{t("Mathematics", "Mathematik")}</option>
+        </select>
+      </label>
+    </div>
+  );
+}
+
+const latest = (c: ClassSummary) => {
+  const i = c.averages.map((v, n) => (v === null ? -1 : n)).filter((n) => n >= 0).pop() ?? 0;
+  return { quiz: i + 1, value: c.averages[i] ?? 0, change: (c.averages[i] ?? 0) - (c.averages[0] ?? 0) };
+};
+
+/** Dashboard for a class other than 4B: nothing from the Quiz 4 story, just its state and a way in. */
+export function OtherClassOverview({
+  cls,
+  language,
+  onPerformance,
+}: {
+  cls: "4A" | "4C";
+  language: Lang;
+  onPerformance: () => void;
+}) {
+  const t = makeT(language);
+  const c = otherClasses[cls];
+  const l = latest(c);
+  const top = c.concepts[0];
+  return (
+    <>
+      <section className="metric-grid">
+        <article>
+          <span className="metric-icon gold">
+            <Icon name="review" />
+          </span>
+          <div>
+            <p>{t("Review queue", "Prüfwarteschlange")}</p>
+            <strong>
+              0 <small>{c.marked === 0 ? t("Quiz 4 papers not uploaded yet", "Quiz-4-Arbeiten noch nicht hochgeladen") : t("exams waiting for review", "Arbeiten warten auf Prüfung")}</small>
+            </strong>
+          </div>
+        </article>
+        <article>
+          <span className="metric-icon teal">
+            <Icon name="check" />
+          </span>
+          <div>
+            <p>{t("Quiz 4 marked", "Quiz 4 bewertet")}</p>
+            <strong>
+              {c.marked} <small>{t(`of ${c.students}`, `von ${c.students}`)}</small>
+            </strong>
+          </div>
+        </article>
+        <article>
+          <span className="metric-icon navy">
+            <Icon name="trend" />
+          </span>
+          <div>
+            <p>{t(`Class average · Quiz ${l.quiz}`, `Klassendurchschnitt · Quiz ${l.quiz}`)}</p>
+            <strong>
+              {l.value}% <small>{l.change >= 0 ? "+" : ""}{l.change} {t("since Quiz 1", "seit Quiz 1")}</small>
+            </strong>
+          </div>
+        </article>
+      </section>
+      <article className="panel other-class-panel">
+        <div className="ai-title">
+          <span>
+            <Icon name={c.marked === 0 ? "clock" : "check"} />
+          </span>
+          <div>
+            <p className="kicker">{t(`GRADE ${cls} · ${c.students} STUDENTS`, `KLASSE ${cls} · ${c.students} KINDER`)}</p>
+            <h2>
+              {c.marked === 0
+                ? t("Quiz 4 papers have not been uploaded yet", "Die Quiz-4-Arbeiten wurden noch nicht hochgeladen")
+                : t("Nothing needs your decision in this class", "In dieser Klasse ist nichts zu entscheiden")}
+            </h2>
+          </div>
+        </div>
+        <p>
+          <b>{t("Most often misunderstood:", "Am häufigsten missverstanden:")}</b> {top.name[language]} ·{" "}
+          {t(`${top.students} of ${c.students} students`, `${top.students} von ${c.students} Kindern`)} ({top.mistake[language]})
+        </p>
+        <Button icon="trend" onClick={onPerformance}>
+          {t(`See Grade ${cls} performance`, `Leistung Klasse ${cls} ansehen`)}
+        </Button>
+      </article>
+    </>
+  );
+}
+
+/** Class performance: one class (trend, misunderstood concepts, most-missed questions) or all classes compared. */
+export function ClassPerformance({
+  khadija,
+  language,
+  onOpenStudent,
+}: {
+  khadija: KhadijaLive;
+  language: Lang;
+  onOpenStudent: (name: string) => void;
+}) {
+  const t = makeT(language);
+  const s = useClassState();
+  const [compare, setCompare] = useState(false);
+  const data: Record<ClassId, ClassSummary> = { "4A": otherClasses["4A"], "4B": summary4B(khadija, s), "4C": otherClasses["4C"] };
+  const cls = s.teacherClass;
+  const c = data[cls];
+  const l = latest(c);
+  const quizzes = ["Quiz 1", "Quiz 2", "Quiz 3", "Quiz 4"];
+  const tabs = (
+    <div className="class-tabs" role="group" aria-label={t("Choose a class", "Klasse wählen")}>
+      {classIds.map((id) => (
+        <button
+          key={id}
+          type="button"
+          aria-pressed={!compare && cls === id}
+          className={!compare && cls === id ? "active" : ""}
+          onClick={() => {
+            updateClassState({ teacherClass: id });
+            setCompare(false);
+          }}
+        >
+          {t("Grade", "Klasse")} {id}
+        </button>
+      ))}
+      <button type="button" aria-pressed={compare} className={compare ? "active" : ""} onClick={() => setCompare(true)}>
+        <Icon name="trend" size={16} /> {t("Compare classes", "Klassen vergleichen")}
+      </button>
+    </div>
+  );
+
+  if (compare)
+    return (
+      <>
+        <div className="teacher-heading">
+          <div>
+            <p className="kicker">{t("MATHEMATICS · 3 CLASSES", "MATHEMATIK · 3 KLASSEN")}</p>
+            <h1>{t("Class performance", "Klassenleistung")}</h1>
+            <p>{t("Average score per quiz, all your Grade 4 classes.", "Durchschnitt pro Quiz, alle Ihre Klassen der Stufe 4.")}</p>
+          </div>
+        </div>
+        {tabs}
+        <article className="panel class-trend">
+          <p className="kicker">{t("ASSESSMENT TRENDS", "ENTWICKLUNG DER PRÜFUNGEN")}</p>
+          <h2>{t("Class averages, Quiz 1 to Quiz 4", "Klassendurchschnitte, Quiz 1 bis Quiz 4")}</h2>
+          <LineChart
+            language={language}
+            fontSize={13}
+            title={t("Class average per quiz for Grades 4A, 4B and 4C", "Klassendurchschnitt pro Quiz für 4A, 4B und 4C")}
+            xLabels={quizzes}
+            series={classIds.map((id, i) => ({
+              name: `${t("Grade", "Klasse")} ${id}`,
+              values: data[id].averages,
+              color: conceptColors[i],
+              shape: conceptShape(i),
+            }))}
+          />
+        </article>
+        <article className="panel compare-table-panel">
+          <div className="compare-table" role="table">
+            <div className="compare-row roster-head" role="row">
+              <span>{t("Class", "Klasse")}</span>
+              <span>{t("Latest average", "Letzter Durchschnitt")}</span>
+              <span>{t("Since Quiz 1", "Seit Quiz 1")}</span>
+              <span>{t("Most often misunderstood", "Am häufigsten missverstanden")}</span>
+              <span />
+            </div>
+            {classIds.map((id) => {
+              const x = data[id];
+              const lx = latest(x);
+              return (
+                <div className="compare-row" role="row" key={id}>
+                  <strong>
+                    {t("Grade", "Klasse")} {id} <small>· {t(`${x.students} students`, `${x.students} Kinder`)}</small>
+                  </strong>
+                  <span>
+                    {lx.value}% <small>(Quiz {lx.quiz})</small>
+                  </span>
+                  <span>
+                    {lx.change >= 0 ? "+" : ""}
+                    {lx.change} {t("points", "Punkte")}
+                  </span>
+                  <span>
+                    {x.concepts[0].name[language]} · {Math.round((x.concepts[0].students / x.students) * 100)}%
+                  </span>
+                  <Button
+                    icon="arrow"
+                    variant="secondary"
+                    onClick={() => {
+                      updateClassState({ teacherClass: id });
+                      setCompare(false);
+                    }}
+                  >
+                    {t("Open", "Öffnen")}
+                  </Button>
+                </div>
+              );
+            })}
+          </div>
+        </article>
+      </>
+    );
+
+  return (
+    <>
+      <div className="teacher-heading">
+        <div>
+          <p className="kicker">
+            {t(`GRADE ${cls} · ${c.students} STUDENTS · MATHEMATICS`, `KLASSE ${cls} · ${c.students} KINDER · MATHEMATIK`)}
+          </p>
+          <h1>{t("Class performance", "Klassenleistung")}</h1>
+          <p>
+            {c.marked === 0
+              ? t("Quiz 4 is not marked yet; figures use Quiz 3.", "Quiz 4 ist noch nicht bewertet; die Zahlen nutzen Quiz 3.")
+              : t(`Quiz 4 marked for ${c.marked} of ${c.students} students.`, `Quiz 4 für ${c.marked} von ${c.students} Kindern bewertet.`)}
+          </p>
+        </div>
+      </div>
+      {tabs}
+      <section className="class-kpis">
+        <article className="panel">
+          <p className="kicker">{t(`CLASS AVERAGE · QUIZ ${l.quiz}`, `KLASSENDURCHSCHNITT · QUIZ ${l.quiz}`)}</p>
+          <strong>{l.value}%</strong>
+          <Status type={l.change > 0 ? "good" : "neutral"}>
+            {l.change >= 0 ? "+" : ""}
+            {l.change} {t("points since Quiz 1", "Punkte seit Quiz 1")}
+          </Status>
+        </article>
+        <article className="panel">
+          <p className="kicker">{t("MOST OFTEN MISUNDERSTOOD", "AM HÄUFIGSTEN MISSVERSTANDEN")}</p>
+          <strong>{c.concepts[0].name[language]}</strong>
+          <Status type="warn">{t(`${c.concepts[0].students} of ${c.students} students`, `${c.concepts[0].students} von ${c.students} Kindern`)}</Status>
+        </article>
+        <article className="panel">
+          <p className="kicker">{t("MOST OFTEN WRONG", "AM HÄUFIGSTEN FALSCH")}</p>
+          <strong>
+            {t("Q", "A")}
+            {c.missed[0].q} · {c.missed[0].task[language]}
+          </strong>
+          <Status type="warn">{t(`${c.missed[0].wrong}% wrong`, `${c.missed[0].wrong} % falsch`)}</Status>
+        </article>
+      </section>
+      <section className="insight-grid">
+        <article className="panel class-trend">
+          <p className="kicker">{t("ASSESSMENT TRENDS", "ENTWICKLUNG DER PRÜFUNGEN")}</p>
+          <h2>{t("Class average per quiz", "Klassendurchschnitt pro Quiz")}</h2>
+          <LineChart
+            language={language}
+            fontSize={13}
+            title={t(`Grade ${cls} average, Quiz 1 to Quiz 4`, `Durchschnitt Klasse ${cls}, Quiz 1 bis Quiz 4`)}
+            xLabels={quizzes}
+            pendingNote={t("not marked", "nicht bewertet")}
+            series={[{ name: `${t("Grade", "Klasse")} ${cls}`, values: c.averages, color: conceptColors[0], shape: conceptShape(0) }]}
+          />
+        </article>
+        <article className="panel">
+          <p className="kicker">{t("FREQUENTLY MISUNDERSTOOD CONCEPTS", "HÄUFIG MISSVERSTANDENE THEMEN")}</p>
+          <h2>{t("Where support is needed", "Wo Unterstützung nötig ist")}</h2>
+          <ol className="concept-rank">
+            {c.concepts.map((k) => {
+              const share = Math.round((k.students / c.students) * 100);
+              return (
+                <li key={k.name.EN}>
+                  <div>
+                    <strong>{k.name[language]}</strong>
+                    <span>
+                      {t(`${k.students} of ${c.students} students`, `${k.students} von ${c.students} Kindern`)} · {share}%
+                    </span>
+                  </div>
+                  <i className="concept-bar" aria-hidden="true">
+                    <b style={{ width: `${share}%` }} />
+                  </i>
+                  <small>
+                    {t("Common mistake:", "Häufiger Fehler:")} {k.mistake[language]}
+                  </small>
+                </li>
+              );
+            })}
+          </ol>
+        </article>
+      </section>
+      <section className="insight-grid">
+        <article className="panel">
+          <p className="kicker">{t(`QUESTIONS MOST OFTEN WRONG · QUIZ ${c.marked === 0 ? 3 : 4}`, `AM HÄUFIGSTEN FALSCH · QUIZ ${c.marked === 0 ? 3 : 4}`)}</p>
+          <h2>{t("Questions to re-teach", "Aufgaben zum Wiederholen")}</h2>
+          {c.missed.map((m) => (
+            <div className="missed-row" key={m.q + m.task.EN}>
+              <span>
+                <b>
+                  {t("Q", "A")}
+                  {m.q}
+                </b>{" "}
+                {m.task[language]}
+              </span>
+              <i className="concept-bar" aria-hidden="true">
+                <b style={{ width: `${m.wrong}%` }} />
+              </i>
+              <strong>{t(`${m.wrong}% wrong`, `${m.wrong} % falsch`)}</strong>
+            </div>
+          ))}
+        </article>
+        <article className="panel">
+          <p className="kicker">{t("STUDENT SNAPSHOT", "SCHÜLERÜBERBLICK")}</p>
+          <h2>{t("Students who need support", "Kinder mit Unterstützungsbedarf")}</h2>
+          {c.support.map((x) => (
+            <div className="support-row" key={x.name}>
+              <span>
+                <strong>{x.name}</strong>
+                <small>{x.focus[language]}</small>
+              </span>
+              <b>{x.score === null ? t("Quiz 4 not marked", "Quiz 4 nicht bewertet") : `${x.score}%`}</b>
+              {cls === "4B" ? (
+                <Button icon="person" variant="ghost" onClick={() => onOpenStudent(x.name)}>
+                  {t("Open record", "Akte öffnen")}
+                </Button>
+              ) : (
+                <span />
+              )}
+            </div>
+          ))}
+        </article>
+      </section>
+    </>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// C31 – Verification pop quizzes: completion, result, improvement and next step
+// ---------------------------------------------------------------------------
+const practiceBefore: Record<string, { skill: string; before: number; label: Text }> = {
+  Khadija: { skill: "compare", before: 0, label: { EN: "Quiz 4 · Q7 0/3", DE: "Quiz 4 · A7 0/3" } },
+  Salma: { skill: "compare", before: 0, label: { EN: "Quiz 4 · Q7 0/3", DE: "Quiz 4 · A7 0/3" } },
+  Hana: { skill: "compare", before: 0, label: { EN: "Quiz 4 · Q7 0/3", DE: "Quiz 4 · A7 0/3" } },
+  Rana: { skill: "compare", before: 0, label: { EN: "Quiz 4 · Q7 0/3", DE: "Quiz 4 · A7 0/3" } },
+  Mariam: { skill: "working", before: 50, label: { EN: "Quiz 4 · Q5 2/4", DE: "Quiz 4 · A5 2/4" } },
+  Laila: { skill: "multi", before: 33, label: { EN: "Quiz 3 · Q2 1/3", DE: "Quiz 3 · A2 1/3" } },
+  Nour: { skill: "division", before: 33, label: { EN: "Quiz 3 · Q6 1/3", DE: "Quiz 3 · A6 1/3" } },
+};
+
+function BeforeAfter({ before, after }: { before: number; after: number | null }) {
+  // Small dumbbell: grey dot = before practice, filled dot = pop quiz. Numbers are shown next to it.
+  const x = (v: number) => 6 + (v / 100) * 108;
+  return (
+    <svg className="before-after" width="120" height="18" viewBox="0 0 120 18" aria-hidden="true">
+      <line x1="6" x2="114" y1="9" y2="9" className="ba-track" />
+      {after !== null && <line x1={x(before)} x2={x(after)} y1="9" y2="9" className="ba-change" />}
+      <circle cx={x(before)} cy="9" r="4.5" className="ba-before" />
+      {after !== null && <circle cx={x(after)} cy="9" r="5" className="ba-after" />}
+    </svg>
+  );
+}
+
+export function QuizMonitor({ khadija, ...common }: Common & Live) {
+  const t = makeT(common.language);
+  const s = useClassState();
+  const rows = roster
+    .filter((r) => practiceBefore[r.name])
+    .map((r) => {
+      const info = practiceBefore[r.name];
+      const state =
+        r.name !== "Khadija"
+          ? r.practice
+          : khadija.practiced
+            ? "done"
+            : khadija.published && khadija.redFlagDecision === "confirmed"
+              ? "pending"
+              : "none";
+      const score = r.name === "Khadija" ? khadija.practiceScore : (r.quizScore ?? null);
+      const after = state === "done" && score !== null ? Math.round((score / 3) * 100) : null;
+      return { name: r.name, state, score, after, ...info };
+    });
+  const done = rows.filter((r) => r.after !== null);
+  const avg = (xs: number[]) => (xs.length ? Math.round(xs.reduce((a, b) => a + b, 0) / xs.length) : 0);
+  const improved = done.filter((r) => (r.after ?? 0) > r.before).length;
+  const setOutcome = (name: string, outcome: GapOutcome | null, skill: Text) => {
+    updateClassState((st) => {
+      const next = { ...st.gapOutcome };
+      if (outcome) next[name] = outcome;
+      else delete next[name];
+      return { gapOutcome: next };
+    });
+    if (!outcome) return;
+    const text = {
+      resolved: { EN: `${skill.EN}: gap marked as resolved after the pop quiz`, DE: `${skill.DE}: Lücke nach dem Kurz-Quiz als behoben markiert` },
+      again: { EN: `${skill.EN}: another practice round assigned`, DE: `${skill.DE}: weitere Übungsrunde zugewiesen` },
+      group: { EN: `${skill.EN}: added to the small-group session`, DE: `${skill.DE}: zur Kleingruppe hinzugefügt` },
+    }[outcome];
+    logActivity("practice", name, text, "teacher");
+    if (outcome === "again" && name === "Khadija")
+      common.addNotification(
+        "student",
+        { EN: "One more short round", DE: "Noch eine kurze Runde" },
+        {
+          EN: "Ms. Ashraf asked you to do 3 new fraction questions. You are getting closer!",
+          DE: "Frau Ashraf möchte, dass du 3 neue Bruchaufgaben machst. Du bist auf einem guten Weg!",
+        },
+        { EN: "Start practice", DE: "Übung starten" },
+        "practice",
+      );
+    common.notify(
+      outcome === "resolved"
+        ? t(`${name}: gap marked as resolved.`, `${name}: Lücke als behoben markiert.`)
+        : outcome === "again"
+          ? t(`${name}: another round assigned${name === "Khadija" ? " and Khadija notified" : ""}.`, `${name}: weitere Runde zugewiesen${name === "Khadija" ? " und Khadija benachrichtigt" : ""}.`)
+          : t(`${name} added to the small-group session.`, `${name} zur Kleingruppe hinzugefügt.`),
+    );
+  };
+  return (
+    <section className="panel students-panel quiz-monitor">
+      <div className="panel-head">
+        <div>
+          <p className="kicker">{t("VERIFICATION POP QUIZZES · GRADE 4B", "KURZ-QUIZZE ZUR KONTROLLE · KLASSE 4B")}</p>
+          <h2>{t("Did the practice help?", "Hat die Übung geholfen?")}</h2>
+        </div>
+      </div>
+      <div className="monitor-summary">
+        <div>
+          <strong>
+            {done.length}/{rows.length}
+          </strong>
+          <span>{t("completed the pop quiz", "haben das Kurz-Quiz gemacht")}</span>
+        </div>
+        <div>
+          <strong>
+            {avg(done.map((r) => r.before))}% → {avg(done.map((r) => r.after ?? 0))}%
+          </strong>
+          <span>{t("average before practice → pop quiz", "Durchschnitt vor der Übung → Kurz-Quiz")}</span>
+        </div>
+        <div>
+          <strong>
+            {improved}/{done.length}
+          </strong>
+          <span>{t("improved after practice", "haben sich verbessert")}</span>
+        </div>
+      </div>
+      <p className="panel-note">
+        {t(
+          "Before = the same skill in the last quiz. Grey dot: before practice; dark dot: pop quiz. Pop quizzes do not change quiz scores.",
+          "Vorher = dieselbe Kompetenz im letzten Quiz. Grauer Punkt: vor der Übung; dunkler Punkt: Kurz-Quiz. Kurz-Quizze ändern keine Quizergebnisse.",
+        )}
+      </p>
+      <div className="monitor-table" role="table">
+        <div className="monitor-row roster-head" role="row">
+          <span>{t("Student · practice", "Kind · Übung")}</span>
+          <span>{t("Before → pop quiz", "Vorher → Kurz-Quiz")}</span>
+          <span>{t("Effect", "Wirkung")}</span>
+          <span>{t("Next step", "Nächster Schritt")}</span>
+        </div>
+        {rows.map((row) => {
+          const skill = skills.find((k) => k.id === row.skill)?.name ?? { EN: "", DE: "" };
+          const outcome = s.gapOutcome[row.name];
+          const change = row.after === null ? null : row.after - row.before;
+          return (
+            <div className="monitor-row" role="row" key={row.name}>
+              <span className="student-cell">
+                <b>{initials(row.name)}</b>
+                <i>
+                  <strong>{row.name}</strong>
+                  <small>{skill[common.language]}</small>
+                </i>
+              </span>
+              <span className="ba-cell">
+                <BeforeAfter before={row.before} after={row.after} />
+                <small>
+                  {row.label[common.language]} ({row.before}%) →{" "}
+                  {row.after === null ? "—" : `${row.score}/3 (${row.after}%)`}
+                </small>
+              </span>
+              <span>
+                {row.state !== "done" ? (
+                  <Status type={row.state === "pending" ? "warn" : "neutral"}>
+                    {row.state === "pending" ? t("Not done yet", "Noch nicht erledigt") : t("Not assigned yet", "Noch nicht zugewiesen")}
+                  </Status>
+                ) : (
+                  <Status type={(change ?? 0) >= 50 ? "good" : (change ?? 0) > 0 ? "neutral" : "warn"}>
+                    {(change ?? 0) > 0
+                      ? t(`Improved +${change} points`, `Verbessert +${change} Punkte`)
+                      : t("No improvement yet", "Noch keine Verbesserung")}
+                  </Status>
+                )}
+              </span>
+              <span className="monitor-action">
+                {row.state === "pending" ? (
+                  <Button icon="bell" variant="ghost" onClick={() => sendPracticeReminder(row.name, common)}>
+                    {s.remindersSent.includes(row.name) ? t("Remind again", "Erneut erinnern") : t("Send reminder", "Erinnern")}
+                  </Button>
+                ) : row.state !== "done" ? null : outcome ? (
+                  <>
+                    <Status type={outcome === "resolved" ? "good" : "neutral"}>
+                      {outcome === "resolved"
+                        ? t("Gap resolved", "Lücke behoben")
+                        : outcome === "again"
+                          ? t("Another round assigned", "Weitere Runde zugewiesen")
+                          : t("In small-group session", "In der Kleingruppe")}
+                    </Status>
+                    <button type="button" className="link-button" onClick={() => setOutcome(row.name, null, skill)}>
+                      {t("Change", "Ändern")}
+                    </button>
+                  </>
+                ) : row.score === 3 ? (
+                  <Button icon="check" variant="secondary" onClick={() => setOutcome(row.name, "resolved", skill)}>
+                    {t("Mark gap resolved", "Lücke als behoben markieren")}
+                  </Button>
+                ) : row.score === 2 ? (
+                  <Button icon="play" variant="secondary" onClick={() => setOutcome(row.name, "again", skill)}>
+                    {t("Assign another round", "Weitere Runde zuweisen")}
+                  </Button>
+                ) : (
+                  <Button icon="person" variant="secondary" onClick={() => setOutcome(row.name, "group", skill)}>
+                    {t("Add to small group", "Zur Kleingruppe hinzufügen")}
+                  </Button>
+                )}
+              </span>
+            </div>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// C6 – Bulk exam upload: several papers at once, matched to students by name
+// ---------------------------------------------------------------------------
+type UploadFile = { id: number; name: string; url: string | null; student: string; quality: PageQuality };
+
+const matchStudent = (fileName: string) => {
+  const lower = fileName.toLowerCase();
+  return roster.find((r) => lower.includes(r.name.toLowerCase()))?.name ?? "";
+};
+
+/** A sample scan drawn on a canvas, so the upload can be tried without real files. */
+function sampleScan(label: string, blurry: boolean) {
+  const canvas = document.createElement("canvas");
+  canvas.width = 600;
+  canvas.height = 800;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return null;
+  ctx.fillStyle = "#ffffff";
+  ctx.fillRect(0, 0, 600, 800);
+  if (blurry) ctx.filter = "blur(5px)";
+  ctx.fillStyle = "#2b2b2b";
+  ctx.font = "bold 34px sans-serif";
+  ctx.fillText("Quiz 4: Fractions", 40, 80);
+  ctx.font = "28px sans-serif";
+  ctx.fillText(label ? `Name: ${label}` : "Name: ______", 40, 140);
+  ctx.strokeStyle = "#2b2b2b";
+  ctx.lineWidth = 3;
+  ["1. 24 x 6 = 144", "2. 132 x 4 = 528", "3. Shade 3/4", "4. 1/2 + 1/4 = 3/4", "5. 20 / 5 = 4 each"].forEach((line, i) => {
+    ctx.fillText(line, 40, 230 + i * 100);
+    ctx.beginPath();
+    ctx.moveTo(40, 250 + i * 100);
+    ctx.lineTo(560, 250 + i * 100);
+    ctx.stroke();
+  });
+  return canvas.toDataURL("image/jpeg", 0.85);
+}
+
+export function BulkUpload(common: Common) {
+  const t = makeT(common.language);
+  const s = useClassState();
+  const [files, setFiles] = useState<UploadFile[]>([]);
+  const [dragging, setDragging] = useState(false);
+
+  const addFiles = (list: { name: string; url: string | null; isImage: boolean }[]) => {
+    const added = list.map((f) => ({ id: newId(), name: f.name, url: f.url, student: matchStudent(f.name), quality: (f.isImage ? "checking" : "pdf") as PageQuality }));
+    setFiles((current) => [...current, ...added]);
+    added.forEach((f) => {
+      if (f.url && f.quality === "checking")
+        analyzePage(f.url).then((quality) => setFiles((current) => current.map((x) => (x.id === f.id ? { ...x, quality } : x))));
+    });
+  };
+  const fromInput = (list: FileList | null) => {
+    if (!list) return;
+    addFiles(
+      [...list].map((file) => ({
+        name: file.name,
+        url: file.type.startsWith("image/") ? URL.createObjectURL(file) : null,
+        isImage: file.type.startsWith("image/"),
+      })),
+    );
+  };
+  const unmatched = files.filter((f) => !f.student).length;
+  const qualityText = (q: PageQuality) =>
+    q === "good"
+      ? t("Clear", "Gut lesbar")
+      : q === "checking"
+        ? t("Checking…", "Wird geprüft…")
+        : q === "pdf"
+          ? "PDF"
+          : q === "blurry"
+            ? t("Blurry – text check needed", "Unscharf – Textprüfung nötig")
+            : q === "dark"
+              ? t("Too dark", "Zu dunkel")
+              : t("Low resolution", "Geringe Auflösung");
+  const importAll = () => {
+    const names = [...new Set(files.map((f) => f.student))];
+    updateClassState((st) => ({
+      bulkUploaded: st.bulkUploaded || names.includes("Judy"),
+      uploadedScans: [...new Set([...st.uploadedScans, ...names])],
+    }));
+    names.forEach((name) => {
+      const count = files.filter((f) => f.student === name).length;
+      logActivity("submitted", name, {
+        EN: `Quiz 4 paper uploaded by the teacher (${count} ${count === 1 ? "page" : "pages"})`,
+        DE: `Quiz-4-Arbeit von der Lehrerin hochgeladen (${count} ${count === 1 ? "Seite" : "Seiten"})`,
+      });
+    });
+    common.notify(
+      t(
+        `${files.length} ${files.length === 1 ? "file" : "files"} uploaded for ${names.join(", ")}.`,
+        `${files.length} ${files.length === 1 ? "Datei" : "Dateien"} hochgeladen für ${names.join(", ")}.`,
+      ),
+    );
+    setFiles([]);
+  };
+
+  return (
+    <div className="bulk-upload">
+      <div
+        className={`drop-zone ${dragging ? "dragging" : ""}`}
+        onDragOver={(e) => {
+          e.preventDefault();
+          setDragging(true);
+        }}
+        onDragLeave={() => setDragging(false)}
+        onDrop={(e) => {
+          e.preventDefault();
+          setDragging(false);
+          fromInput(e.dataTransfer.files);
+        }}
+      >
+        <Icon name="book" size={26} />
+        <div>
+          <strong>{t("Upload several papers at once", "Mehrere Arbeiten auf einmal hochladen")}</strong>
+          <small>
+            {t(
+              "Drop scans here, or choose files. Each file is matched to a student by the name in the file name; you can change any match before adding.",
+              "Scans hier ablegen oder Dateien wählen. Jede Datei wird über den Namen im Dateinamen einem Kind zugeordnet; Sie können jede Zuordnung vor dem Hinzufügen ändern.",
+            )}
+          </small>
+        </div>
+        <div className="drop-actions">
+          <label className="button secondary file-choice">
+            <Icon name="book" />
+            {t("Choose files", "Dateien wählen")}
+            <input
+              type="file"
+              multiple
+              accept="image/*,application/pdf"
+              onChange={(e) => {
+                fromInput(e.target.files);
+                e.target.value = "";
+              }}
+            />
+          </label>
+          <Button
+            icon="spark"
+            variant="ghost"
+            onClick={() =>
+              addFiles([
+                { name: "Judy_Quiz4.jpg", url: sampleScan("Judy", false), isImage: true },
+                { name: "scan_0042.jpg", url: sampleScan("", true), isImage: true },
+                { name: "Hana quiz 4 page 2.jpg", url: sampleScan("Hana", false), isImage: true },
+              ])
+            }
+          >
+            {t("Try 3 sample scans", "3 Beispiel-Scans testen")}
+          </Button>
+        </div>
+      </div>
+      {files.length > 0 && (
+        <div className="upload-match">
+          <h3>
+            {t(`Match ${files.length} files to students`, `${files.length} Dateien Kindern zuordnen`)}
+            {unmatched > 0 && <Status type="warn">{t(`${unmatched} not matched`, `${unmatched} nicht zugeordnet`)}</Status>}
+          </h3>
+          {files.map((f) => {
+            const sameStudent = files.filter((x) => x.student === f.student && f.student).length;
+            const missing = f.student && roster.find((r) => r.name === f.student)?.q5.group === "missing" && !s.bulkUploaded;
+            return (
+              <div className="upload-row" key={f.id}>
+                {f.url ? <img src={f.url} alt="" /> : <span className="upload-thumb">PDF</span>}
+                <span className="upload-name">
+                  <strong>{f.name}</strong>
+                  <Status type={f.quality === "good" || f.quality === "pdf" ? "good" : f.quality === "checking" ? "neutral" : "warn"}>
+                    {qualityText(f.quality)}
+                  </Status>
+                </span>
+                <label>
+                  <span className="sr-only">{t(`Student for ${f.name}`, `Kind für ${f.name}`)}</span>
+                  <select
+                    value={f.student}
+                    onChange={(e) => setFiles((current) => current.map((x) => (x.id === f.id ? { ...x, student: e.target.value } : x)))}
+                  >
+                    <option value="">{t("Choose a student…", "Kind wählen…")}</option>
+                    {roster.map((r) => (
+                      <option key={r.name} value={r.name}>
+                        {r.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <span className="upload-status">
+                  {!f.student ? (
+                    <Status type="warn">{t("No name found – choose a student", "Kein Name gefunden – Kind wählen")}</Status>
+                  ) : missing ? (
+                    <Status type="good">{t("Missing paper – will be added", "Fehlende Arbeit – wird hinzugefügt")}</Status>
+                  ) : sameStudent > 1 ? (
+                    <Status type="neutral">{t(`${sameStudent} pages for ${f.student}`, `${sameStudent} Seiten für ${f.student}`)}</Status>
+                  ) : (
+                    <Status type="neutral">{t("Already submitted – adds a page", "Schon abgegeben – fügt eine Seite hinzu")}</Status>
+                  )}
+                </span>
+                <button
+                  type="button"
+                  className="icon-button"
+                  aria-label={t(`Remove ${f.name}`, `${f.name} entfernen`)}
+                  onClick={() => setFiles((current) => current.filter((x) => x.id !== f.id))}
+                >
+                  <Icon name="close" size={16} />
+                </button>
+              </div>
+            );
+          })}
+          <div className="upload-actions">
+            <Button icon="close" variant="ghost" onClick={() => setFiles([])}>
+              {t("Cancel", "Abbrechen")}
+            </Button>
+            <Button icon="check" disabled={unmatched > 0} onClick={importAll}>
+              {t(`Add ${files.length} ${files.length === 1 ? "file" : "files"}`, `${files.length} ${files.length === 1 ? "Datei" : "Dateien"} hinzufügen`)}
+            </Button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+

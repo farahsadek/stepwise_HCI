@@ -7,16 +7,35 @@ import {
   type ReactElement,
   type ReactNode,
 } from "react";
-import { ActivityHistoryPage, RecentActivity, RoleActivity, logActivity } from "./activity";
+import {
+  ActivityHistoryPage,
+  RecentActivity,
+  RoleActivity,
+  logActivity,
+  markActivityUndone,
+} from "./activity";
+import { ConfirmDialog, ErrorNote, GradingLoader, HelpTip, useEscape } from "./heuristics";
 import { AccessibilityToolbar, ReadAloudButton, requestReadAloud } from "./accessibility";
 import { Button, Icon, Status, type IconName } from "./ui";
-import { khadijaConcepts, newId, questions, updateClassState, useClassState } from "./store";
+import {
+  flaggedReadings,
+  khadijaConcepts,
+  newId,
+  questions,
+  updateClassState,
+  useClassState,
+  type FlaggedReading,
+} from "./store";
 import {
   AssessmentsPage,
+  ClassPerformance,
   ClassPicker,
   Gradebook,
   MessagesPage,
   NoteComposer,
+  OtherClassOverview,
+  OcrCheck,
+  OcrQueue,
   QuestionReview,
   QuizMonitor,
   ResourcesPanel,
@@ -201,6 +220,9 @@ const germanCopy: Record<string, string> = {
   "Confirm AI mark": "KI-Bewertung bestätigen",
   Override: "Ändern",
   Dismiss: "Verwerfen",
+  "Reject AI mark": "KI-Bewertung ablehnen",
+  "AI mark rejected": "KI-Bewertung abgelehnt",
+  "Enter your own mark.": "Geben Sie Ihre eigene Bewertung ein.",
   "REPEATED LEARNING GAP": "WIEDERHOLTE LERNLÜCKE",
   "Fraction-comparison error": "Fehler beim Bruchvergleich",
   "Khadija has made the same comparison error across three quizzes. Confirming creates a teacher-visible support flag.":
@@ -261,6 +283,17 @@ const germanCopy: Record<string, string> = {
   Cancel: "Abbrechen",
   "Save override": "Änderung speichern",
   "Read aloud": "Vorlesen",
+  "Teacher checking": "Lehrerin prüft",
+  "Type your username first, then tap the 4 numbers of your PIN.":
+    "Schreib zuerst deinen Benutzernamen und tippe dann die 4 Zahlen deiner PIN.",
+  "Your PIN has 4 numbers. Tap the missing numbers, then press Log in.":
+    "Deine PIN hat 4 Zahlen. Tippe die fehlenden Zahlen und drücke dann Anmelden.",
+  "That username or PIN is not right. Tap Clear, enter your PIN again, or ask your teacher for help.":
+    "Benutzername oder PIN stimmen nicht. Tippe auf Löschen, gib deine PIN neu ein oder frag deine Lehrerin.",
+  "Enter your email address, then your password.": "Geben Sie Ihre E-Mail-Adresse und dann Ihr Passwort ein.",
+  "Enter your password, then press Log in.": "Geben Sie Ihr Passwort ein und drücken Sie dann Anmelden.",
+  "The email or password is not right. Check for typing mistakes, or press Use demo account.":
+    "E-Mail oder Passwort stimmen nicht. Prüfen Sie auf Tippfehler oder drücken Sie Demo-Konto verwenden.",
   "EXAM CONTEXT": "KONTEXT DER ARBEIT",
   "Current score": "Aktuelle Punktzahl",
   "Not graded": "Nicht bewertet",
@@ -273,8 +306,8 @@ const germanCopy: Record<string, string> = {
     "Prüfen Sie Scan und KI-Erklärung, bevor Sie eine Bewertung bestätigen.",
   "View class insights": "Klassenanalyse ansehen",
   "The flagged answer is saved as": "Die markierte Antwort wurde gespeichert als",
-  "Strong multiplication. Practice comparing fractions with visual models.":
-    "Sichere Multiplikation. Übe den Bruchvergleich mit visuellen Modellen.",
+  "Strong multiplication. Practice comparing fractions with drawings.":
+    "Sichere Multiplikation. Übe den Bruchvergleich mit Zeichnungen.",
   "Show each step so your reasoning is clear.":
     "Zeige jeden Schritt, damit dein Rechenweg verständlich ist.",
   "Use a fraction model before choosing the comparison sign.":
@@ -305,7 +338,7 @@ const germanCopy: Record<string, string> = {
   MESSAGES: "NACHRICHTEN",
   "Messages from Ms. Ashraf": "Nachrichten von Frau Ashraf",
   "Ms. Ashraf · 4 October": "Frau Ashraf · 4. Oktober",
-  "Khadija is building confidence with multiplication. Short fraction activities at home will help.":
+  "Khadija is getting stronger at multiplication. Short fraction activities at home will help.":
     "Khadija wird beim Multiplizieren sicherer. Kurze Bruchübungen zu Hause helfen ihr.",
   Reply: "Antworten",
   "Message Ms. Ashraf": "Frau Ashraf schreiben",
@@ -441,14 +474,36 @@ function Localize({ language, children }: { language: Language; children: ReactN
   return <>{walk(children)}</>;
 }
 
+/** A new page (login, role, view or tab) starts at the top instead of the previous scroll position. */
+function useScrollTopOn(key: string) {
+  useEffect(() => {
+    window.scrollTo({ top: 0, left: 0 });
+  }, [key]);
+}
+
+/**
+ * Stepwise mark: two steps with a sprout growing from the top one ("Every little step helps us
+ * grow"). Colours come from the shared palette; outline weight is set per role in CSS
+ * (thick and playful for students, finer for teacher and parent).
+ */
+export function LogoMark({ className = "logo-mark" }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 48 48" aria-hidden="true" focusable="false">
+      <g className="logo-mark-lines" fill="none" stroke="currentColor" strokeLinejoin="round" strokeLinecap="round">
+        <rect x="5" y="31" width="17" height="13" rx="2.5" fill="#b8d8e8" />
+        <rect x="21" y="22" width="22" height="22" rx="2.5" fill="#f5dfa8" />
+        <path d="M32 22 V11" />
+        <path className="logo-leaf" d="M32 15 C26.5 15 23.5 11.5 23.5 7 C29 7 32 10.5 32 15 Z" fill="#a8c9b5" />
+        <path className="logo-leaf logo-leaf-right" d="M32 12 C36.5 12 40.5 9 40.5 4 C35.5 4 32 7.5 32 12 Z" fill="#a8c9b5" />
+      </g>
+    </svg>
+  );
+}
+
 function Logo({ compact = false }: { compact?: boolean }) {
   return (
     <div className="logo">
-      <span className="steps">
-        <i />
-        <i />
-        <i />
-      </span>
+      <LogoMark />
       {!compact && <strong>Stepwise</strong>}
     </div>
   );
@@ -609,6 +664,7 @@ function TopBar({
   readAloud?: { target: string; screenKey: string };
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
+  useEscape(menuOpen, () => setMenuOpen(false));
   const user =
     role === "student"
       ? { name: "Khadija", role: language === "DE" ? "Schülerin" : "Student", initials: "KA" }
@@ -647,6 +703,7 @@ function TopBar({
               ? `Benachrichtigungen, ${unreadCount} ungelesen`
               : `Notifications, ${unreadCount} unread`
           }
+          title={language === "DE" ? "Benachrichtigungen" : "Notifications"}
         >
           <Icon name="bell" />
           {unreadCount > 0 && <span>{unreadCount > 9 ? "9+" : unreadCount}</span>}
@@ -725,12 +782,16 @@ function Login({
   const submitAdult = (event: React.FormEvent) => {
     event.preventDefault();
     if (!email.trim()) {
-      setError("Enter your email");
+      setError("Enter your email address, then your password.");
+      return;
+    }
+    if (!password) {
+      setError("Enter your password, then press Log in.");
       return;
     }
     const expectedEmail = tab === "teacher" ? "somaya@stepwise.demo" : "parent@stepwise.demo";
     if (email.trim().toLowerCase() !== expectedEmail || password !== "demo1234") {
-      setError("Wrong email or password");
+      setError("The email or password is not right. Check for typing mistakes, or press Use demo account.");
       return;
     }
     setError("");
@@ -738,8 +799,16 @@ function Login({
   };
   const submitStudent = (event: React.FormEvent) => {
     event.preventDefault();
+    if (!username.trim()) {
+      setError("Type your username first, then tap the 4 numbers of your PIN.");
+      return;
+    }
+    if (pin.length < 4) {
+      setError("Your PIN has 4 numbers. Tap the missing numbers, then press Log in.");
+      return;
+    }
     if (username.trim().toLowerCase() !== "khadija" || pin !== "1234") {
-      setError("Oops, try again");
+      setError("That username or PIN is not right. Tap Clear, enter your PIN again, or ask your teacher for help.");
       return;
     }
     setError("");
@@ -974,8 +1043,10 @@ function StudentNav({
     { id: "notifications", icon: "flag", en: "Updates", de: "Neuigkeiten" },
     { id: "progress", icon: "trend", en: "Progress", de: "Fortschritt" },
   ];
+  const navRef = useRef<HTMLElement>(null);
+  useEffect(() => scrollActiveIntoView(navRef.current), [view]);
   return (
-    <nav className="student-nav">
+    <nav className="student-nav" ref={navRef}>
       {items.map((item) => (
         <button
           key={item.id}
@@ -988,6 +1059,13 @@ function StudentNav({
       ))}
     </nav>
   );
+}
+
+/** Bottom tab bars scroll sideways on small phones: keep the current tab visible. */
+function scrollActiveIntoView(nav: HTMLElement | null) {
+  const active = nav?.querySelector<HTMLElement>("button.active");
+  if (!nav || !active || nav.scrollWidth <= nav.clientWidth) return;
+  nav.scrollTo({ left: active.offsetLeft - (nav.clientWidth - active.offsetWidth) / 2, behavior: "smooth" });
 }
 
 function StairChart({
@@ -1116,6 +1194,7 @@ function StudentApp({
   navigationRequest: NavigationRequest;
 }) {
   const [view, setView] = useState<StudentView>("home");
+  useScrollTopOn(view);
   const [practiceStep, setPracticeStep] = useState(0);
   const [practiceAnswer, setPracticeAnswer] = useState<number | null>(null);
   const [uploadStep, setUploadStep] = useState(0);
@@ -1128,6 +1207,9 @@ function StudentApp({
   const [quizAnswers, setQuizAnswers] = useState<number[]>([]);
   const [quizRound, setQuizRound] = useState(0);
   const [helpRequest, setHelpRequest] = useState<HelpRequest | null>(null);
+  useEscape(helpRequest !== null, () => setHelpRequest(null));
+  // Nielsen #5: the exam language is chosen on purpose before sending (no silent default).
+  const [languageChosen, setLanguageChosen] = useState(false);
   const [helpReason, setHelpReason] = useState<"reading" | "mark">("reading");
   const [helpMessage, setHelpMessage] = useState("");
   const de = language === "DE";
@@ -1289,17 +1371,26 @@ function StudentApp({
       blurry: {
         type: "warn" as const,
         label: t("Blurry", "Unscharf"),
-        advice: t("Hold the tablet still and retake it.", "Halte das Tablet ruhig und mache es neu."),
+        advice: t(
+          "This page is blurry. Hold the tablet still, then tap Retake.",
+          "Diese Seite ist unscharf. Halte das Tablet ruhig und tippe dann auf Neu.",
+        ),
       },
       dark: {
         type: "warn" as const,
         label: t("Too dark", "Zu dunkel"),
-        advice: t("Use more light and retake it.", "Nutze mehr Licht und mache es neu."),
+        advice: t(
+          "This page is too dark. Turn on more light, then tap Retake.",
+          "Diese Seite ist zu dunkel. Mach mehr Licht an und tippe dann auf Neu.",
+        ),
       },
       small: {
         type: "warn" as const,
         label: t("Too small", "Zu klein"),
-        advice: t("Move closer to the page and retake it.", "Geh näher an die Seite und mache es neu."),
+        advice: t(
+          "This page is too small to read. Move closer, then tap Retake.",
+          "Diese Seite ist zu klein zum Lesen. Geh näher heran und tippe dann auf Neu.",
+        ),
       },
     })[quality];
   const startPractice = () => {
@@ -1935,16 +2026,29 @@ function StudentApp({
                   ? t("Pick one answer. You will see the results at the end.", "Wähle eine Antwort. Die Ergebnisse siehst du am Ende.")
                   : t("Answer saved. You can still change it.", "Antwort gespeichert. Du kannst sie noch ändern.")}
               </p>
+              {practiceStep > 0 && (
+                <Button
+                  icon="arrow"
+                  variant="ghost"
+                  className="back-button"
+                  onClick={() => {
+                    setPracticeStep(practiceStep - 1);
+                    setPracticeAnswer(quizAnswers[practiceStep - 1] ?? null);
+                  }}
+                >
+                  {t("Previous question", "Vorige Aufgabe")}
+                </Button>
+              )}
               <Button
                 icon={practiceStep === 2 ? "check" : "arrow"}
                 disabled={practiceAnswer === null}
                 onClick={() => {
                   if (practiceAnswer === null) return;
-                  const answers = [...quizAnswers.slice(0, practiceStep), practiceAnswer];
+                  const answers = [...quizAnswers.slice(0, practiceStep), practiceAnswer, ...quizAnswers.slice(practiceStep + 1)];
                   setQuizAnswers(answers);
                   if (practiceStep < 2) {
                     setPracticeStep(practiceStep + 1);
-                    setPracticeAnswer(null);
+                    setPracticeAnswer(quizAnswers[practiceStep + 1] ?? null);
                     return;
                   }
                   const right = answers.filter((answer, i) => answer === practiceQuestions[i].correct).length;
@@ -2162,9 +2266,14 @@ function StudentApp({
                   <p>
                     {t("Quiz 4: Fractions and word problems", "Quiz 4: Brüche und Sachaufgaben")}
                   </p>
-                  <Button icon="check" onClick={() => setUploadStep(1)}>
-                    {t("Choose this exam", "Diese Arbeit wählen")}
-                  </Button>
+                  <div className="lesson-actions">
+                    <Button icon="close" variant="ghost" onClick={() => setView("home")}>
+                      {t("Cancel", "Abbrechen")}
+                    </Button>
+                    <Button icon="check" onClick={() => setUploadStep(1)}>
+                      {t("Choose this exam", "Diese Arbeit wählen")}
+                    </Button>
+                  </div>
                 </>
               )}
               {uploadStep === 1 && (
@@ -2237,7 +2346,7 @@ function StudentApp({
                               {qualityStatus(page.quality).label}
                             </Status>
                             {qualityStatus(page.quality).advice && (
-                              <p className="page-advice">{qualityStatus(page.quality).advice}</p>
+                              <ErrorNote>{qualityStatus(page.quality).advice}</ErrorNote>
                             )}
                             <div className="page-actions">
                               <button onClick={() => setCamera({ replaceId: page.id })}>
@@ -2258,9 +2367,14 @@ function StudentApp({
                       </div>
                     </>
                   )}
-                  <Button icon="arrow" disabled={!pagesReady} onClick={() => setUploadStep(2)}>
-                    {t("Check my pages", "Meine Seiten prüfen")}
-                  </Button>
+                  <div className="lesson-actions">
+                    <Button icon="arrow" variant="ghost" className="back-button" onClick={() => setUploadStep(0)}>
+                      {t("Back", "Zurück")}
+                    </Button>
+                    <Button icon="arrow" disabled={!pagesReady} onClick={() => setUploadStep(2)}>
+                      {t("Check my pages", "Meine Seiten prüfen")}
+                    </Button>
+                  </div>
                   {pages.length > 0 && !pagesReady && (
                     <p className="upload-hint" role="status">
                       {pages.some((page) => page.quality === "checking")
@@ -2296,19 +2410,34 @@ function StudentApp({
                   <label className="exam-language-field">
                     {t("Exam language", "Prüfungssprache")}
                     <select
-                      value={examLanguage}
-                      onChange={(event) => setExamLanguage(event.target.value as Language)}
+                      value={languageChosen ? examLanguage : ""}
+                      onChange={(event) => {
+                        setExamLanguage(event.target.value as Language);
+                        setLanguageChosen(true);
+                      }}
                     >
+                      <option value="" disabled>
+                        {t("Choose a language…", "Sprache wählen…")}
+                      </option>
                       <option value="EN">{t("English", "Englisch")}</option>
                       <option value="DE">Deutsch</option>
                     </select>
                   </label>
+                  {!languageChosen && (
+                    <ErrorNote>
+                      {t(
+                        "Choose the language your exam is written in. Then you can send it.",
+                        "Wähle die Sprache, in der deine Arbeit geschrieben ist. Dann kannst du sie senden.",
+                      )}
+                    </ErrorNote>
+                  )}
                   <div className="lesson-actions">
                     <Button icon="edit" variant="secondary" onClick={() => setUploadStep(1)}>
                       {t("Change pages", "Seiten ändern")}
                     </Button>
                     <Button
                       icon="arrow"
+                      disabled={!languageChosen || !pagesReady}
                       onClick={() => {
                         setUploadStep(3);
                         logActivity("submitted", "Khadija", {
@@ -2617,6 +2746,7 @@ function StudentApp({
               className="modal-close"
               onClick={() => setHelpRequest(null)}
               aria-label={t("Close", "Schließen")}
+              title={t("Close", "Schließen")}
             >
               <Icon name="close" />
             </button>
@@ -2713,16 +2843,19 @@ function TeacherSidebar({
     { id: "messages", icon: "message", label: "Messages", count: messageCount },
     { id: "activity", icon: "clock", label: "Activity history" },
   ];
+  const navRef = useRef<HTMLElement>(null);
+  useEffect(() => scrollActiveIntoView(navRef.current), [view]);
   return (
     <Localize language={language}>
       <aside className="teacher-side">
         <Logo />{" "}
-        <nav>
+        <nav ref={navRef}>
           {items.map((item) => (
             <button
               key={item.id}
               className={view === item.id || (item.id === "students" && view === "student") ? "active" : ""}
               onClick={() => setView(item.id)}
+              title={translateText(item.label, language)}
             >
               <Icon name={item.icon} />
               {item.label}
@@ -2862,10 +2995,18 @@ function TeacherApp({
   practiceScore: number | null;
 }) {
   const [view, setView] = useState<TeacherView>("overview");
+  useScrollTopOn(view);
   const [stage, setStage] = useState<ReviewStage>("ocr");
   const [selectedStudent, setSelectedStudent] = useState<ReviewStudent>("Khadija");
   const [modal, setModal] = useState(false);
+  const [overrideReason, setOverrideReason] = useState("");
+  const [overrideError, setOverrideError] = useState(false);
+  const [confirmPublish, setConfirmPublish] = useState(false);
+  // Papers the AI has finished grading (key: student + verified answer); first visit shows progress.
+  const [gradedKeys, setGradedKeys] = useState<string[]>([]);
   const [drawer, setDrawer] = useState(false);
+  useEscape(modal, () => setModal(false));
+  useEscape(drawer, () => setDrawer(false));
   const [overrideAnswer, setOverrideAnswer] = useState(studentAnswer);
   const [overrideMark, setOverrideMark] = useState(3);
   const classState = useClassState();
@@ -2877,6 +3018,10 @@ function TeacherApp({
   const [recordName, setRecordName] = useState("Khadija");
   const [noteFor, setNoteFor] = useState<string | null>(null);
   const [ocrDraft, setOcrDraft] = useState<Record<string, string>>({});
+  // Current flagged OCR reading (least certain first within each paper).
+  const [flagId, setFlagId] = useState("khadija-q2");
+  const [byQuestion, setByQuestion] = useState<5 | 7>(5);
+  const tx = (en: string, de: string) => (language === "DE" ? de : en);
   const [otherFeedback, setOtherFeedback] = useState<Record<"Mariam" | "Salma", string>>({
     Mariam: "Show each step so your reasoning is clear.",
     Salma: "Use a fraction model before choosing the comparison sign.",
@@ -2950,9 +3095,15 @@ function TeacherApp({
       student: "Salma" as ReviewStudent,
       initials: "SN",
       urgency: "High",
-      flag: otherReviewed.includes("Salma") ? "Confirmed" : "Unclear answer",
+      flag: otherReviewed.includes("Salma")
+        ? "Confirmed"
+        : classState.rejected.includes("Salma")
+          ? "AI mark rejected"
+          : "Unclear answer",
       confidence: "52%",
-      why: "Answer and working are both unclear.",
+      why: classState.rejected.includes("Salma")
+        ? "Enter your own mark."
+        : "Answer and working are both unclear.",
       priority: otherReviewed.includes("Salma") ? 30 : 1,
     },
     {
@@ -2960,9 +3111,15 @@ function TeacherApp({
       student: "Mariam" as ReviewStudent,
       initials: "MS",
       urgency: "Medium",
-      flag: otherReviewed.includes("Mariam") ? "Confirmed" : "Partial reasoning",
+      flag: otherReviewed.includes("Mariam")
+        ? "Confirmed"
+        : classState.rejected.includes("Mariam")
+          ? "AI mark rejected"
+          : "Partial reasoning",
       confidence: "74%",
-      why: "AI proposes partial credit for reasoning.",
+      why: classState.rejected.includes("Mariam")
+        ? "Enter your own mark."
+        : "AI proposes partial credit for reasoning.",
       priority: otherReviewed.includes("Mariam") ? 31 : 2,
     },
     {
@@ -2990,40 +3147,254 @@ function TeacherApp({
     .sort((a, b) => a.priority - b.priority)
     .map((item, index) => ({ ...item, rank: index + 1 }));
   const openReview = (student: ReviewStudent, nextStage: ReviewStage = "ocr") => {
+    const firstFlag = flaggedReadings.find((item) => item.student === student);
+    if (firstFlag) setFlagId(firstFlag.id);
     setSelectedStudent(student);
     setStage(nextStage);
     setView("review");
   };
-  const confirmMark = (mark = 3, answer = "528") => {
+  // Mariam (Q5, 4 marks) and Salma (Q7, 3 marks): AI proposal follows the verified text.
+  const otherQ = selectedStudent === "Mariam" ? { q: 5, out: 4 } : { q: 7, out: 3 };
+  const otherFlag = flaggedReadings.find((item) => item.student === selectedStudent && item.q === otherQ.q);
+  const otherAnswer =
+    selectedStudent === "Khadija" ? "" : (classState.ocrValues[selectedStudent] ?? otherFlag?.read ?? "");
+  const otherVerified = selectedStudent !== "Khadija" && verifiedStudents.includes(selectedStudent);
+  const otherAi: number | null =
+    selectedStudent === "Mariam"
+      ? 2
+      : selectedStudent === "Salma" && otherVerified
+        ? otherAnswer.trim() === "2/3 > 3/5"
+          ? 3
+          : 0
+        : null;
+  const otherTeacherMark =
+    selectedStudent !== "Khadija" && otherReviewed.includes(selectedStudent)
+      ? classState.markEdits[`${selectedStudent}:${otherQ.q}`]
+      : undefined;
+  const rejectOther = () => {
+    const name = selectedStudent;
+    const key = `${name}:${otherQ.q}`;
+    const before = { edits: classState.markEdits, reviewed: otherReviewed, rejected: classState.rejected };
+    const { [key]: _removed, ...rest } = classState.markEdits;
+    updateClassState({ markEdits: rest, rejected: [...new Set([...classState.rejected, name])] });
+    setOtherReviewed(otherReviewed.filter((item) => item !== name));
+    const entry = logActivity("mark", name, {
+      EN: `Quiz 4 · Q${otherQ.q}: AI mark rejected, waiting for the teacher's mark`,
+      DE: `Quiz 4 · A${otherQ.q}: KI-Bewertung abgelehnt, wartet auf die Bewertung der Lehrerin`,
+    });
+    notify({
+      message: tx(
+        `AI mark rejected. ${name} stays in your queue until you enter a mark.`,
+        `KI-Bewertung abgelehnt. ${name} bleibt in der Warteschlange, bis Sie eine Bewertung eingeben.`,
+      ),
+      actionLabel: "Undo",
+      onAction: () => {
+        updateClassState({ markEdits: before.edits, rejected: before.rejected });
+        setOtherReviewed(before.reviewed);
+        markActivityUndone(entry);
+      },
+    });
+    setView("overview");
+  };
+  const confirmMark = (mark = 3, answer = "528", reason = "") => {
+    const why = reason.trim() ? { EN: ` · reason: ${reason.trim()}`, DE: ` · Grund: ${reason.trim()}` } : { EN: "", DE: "" };
     if (selectedStudent === "Khadija") {
+      const before = { studentAnswer, awardedMark, dismissed, published };
       setStudentAnswer(answer);
       setAwardedMark(mark);
       setDismissed(false);
       setPublished(false);
       const proposal = answer.trim() === "528" ? 3 : 0;
-      if (mark === proposal && answer === studentAnswer) {
-        logActivity("mark", "Khadija", {
-          EN: `Quiz 4 · Q2: AI mark ${mark}/3 confirmed`,
-          DE: `Quiz 4 · A2: KI-Bewertung ${mark}/3 bestätigt`,
-        });
-      } else {
-        logActivity("override", "Khadija", {
-          EN: `Quiz 4 · Q2: AI proposed ${aiQ2}/3, teacher awarded ${mark}/3 (answer ${answer})`,
-          DE: `Quiz 4 · A2: KI schlug ${aiQ2}/3 vor, Lehrerin vergab ${mark}/3 (Antwort ${answer})`,
-        });
-      }
-      notify(`Khadija’s answer saved as ${answer}; ${mark}/3 awarded.`);
+      const entry =
+        mark === proposal && answer === studentAnswer
+          ? logActivity("mark", "Khadija", {
+              EN: `Quiz 4 · Q2: AI mark ${mark}/3 confirmed`,
+              DE: `Quiz 4 · A2: KI-Bewertung ${mark}/3 bestätigt`,
+            })
+          : logActivity("override", "Khadija", {
+              EN: `Quiz 4 · Q2: AI proposed ${aiQ2}/3, teacher awarded ${mark}/3 (answer ${answer})${why.EN}`,
+              DE: `Quiz 4 · A2: KI schlug ${aiQ2}/3 vor, Lehrerin vergab ${mark}/3 (Antwort ${answer})${why.DE}`,
+            });
+      notify({
+        message: `Khadija’s answer saved as ${answer}; ${mark}/3 awarded.`,
+        actionLabel: "Undo",
+        onAction: () => {
+          setStudentAnswer(before.studentAnswer);
+          setAwardedMark(before.awardedMark);
+          setDismissed(before.dismissed);
+          setPublished(before.published);
+          setSelectedStudent("Khadija");
+          setStage("grade");
+          setView("review");
+          markActivityUndone(entry);
+        },
+      });
       setStage("redflag");
     } else {
-      logActivity("mark", selectedStudent, {
-        EN: `Quiz 4 · ${selectedEvidence.question}: mark confirmed`,
-        DE: `Quiz 4 · ${selectedEvidence.question}: Bewertung bestätigt`,
+      const name = selectedStudent;
+      const key = `${name}:${otherQ.q}`;
+      const before = {
+        markEdits: classState.markEdits,
+        ocrValues: classState.ocrValues,
+        rejected: classState.rejected,
+        reviewed: otherReviewed,
+      };
+      updateClassState((st) => ({
+        markEdits: { ...st.markEdits, [key]: mark },
+        ocrValues: { ...st.ocrValues, [name]: answer },
+        rejected: st.rejected.filter((item) => item !== name),
+      }));
+      const confirmed = otherAi !== null && mark === otherAi && answer === otherAnswer;
+      const entry = confirmed
+        ? logActivity("mark", name, {
+            EN: `Quiz 4 · Q${otherQ.q}: AI mark ${mark}/${otherQ.out} confirmed`,
+            DE: `Quiz 4 · A${otherQ.q}: KI-Bewertung ${mark}/${otherQ.out} bestätigt`,
+          })
+        : logActivity("override", name, {
+            EN: `Quiz 4 · Q${otherQ.q}: AI proposed ${otherAi === null ? "no mark" : `${otherAi}/${otherQ.out}`}, teacher awarded ${mark}/${otherQ.out} (answer ${answer})${why.EN}`,
+            DE: `Quiz 4 · A${otherQ.q}: KI schlug ${otherAi === null ? "keine Bewertung" : `${otherAi}/${otherQ.out}`} vor, Lehrerin vergab ${mark}/${otherQ.out} (Antwort ${answer})${why.DE}`,
+          });
+      notify({
+        message: confirmed
+          ? `${name}’s mark was confirmed.`
+          : tx(`${name}’s mark saved as ${mark}/${otherQ.out}.`, `Bewertung für ${name} als ${mark}/${otherQ.out} gespeichert.`),
+        actionLabel: "Undo",
+        onAction: () => {
+          updateClassState({ markEdits: before.markEdits, ocrValues: before.ocrValues, rejected: before.rejected });
+          setOtherReviewed(before.reviewed);
+          markActivityUndone(entry);
+        },
       });
-      setOtherReviewed([...new Set([...otherReviewed, selectedStudent])]);
-      notify(`${selectedStudent}’s mark was confirmed.`);
+      setOtherReviewed([...new Set([...otherReviewed, name])]);
       setView("overview");
     }
     setModal(false);
+  };
+  // Red-flag decision (confirm / dismiss / postpone) with Undo that restores decision, step and log.
+  const decideRedFlag = (decision: "confirmed" | "dismissed" | "postponed") => {
+    const before = { decision: redFlagDecision, stage };
+    setRedFlagDecision(decision);
+    const entry = logActivity("redflag", "Khadija", {
+      EN:
+        decision === "confirmed"
+          ? "Fraction-comparison flag confirmed; practice assigned"
+          : decision === "dismissed"
+            ? "Fraction-comparison flag dismissed"
+            : "Fraction-comparison flag postponed",
+      DE:
+        decision === "confirmed"
+          ? "Warnung „Brüche vergleichen“ bestätigt; Übung zugewiesen"
+          : decision === "dismissed"
+            ? "Warnung „Brüche vergleichen“ verworfen"
+            : "Warnung „Brüche vergleichen“ zurückgestellt",
+    });
+    notify({
+      message:
+        decision === "confirmed"
+          ? "Learning-gap flag confirmed."
+          : decision === "dismissed"
+            ? "Learning-gap flag dismissed."
+            : "Learning-gap decision postponed.",
+      actionLabel: "Undo",
+      onAction: () => {
+        setRedFlagDecision(before.decision);
+        setStage(before.stage);
+        markActivityUndone(entry);
+      },
+    });
+    if (decision === "confirmed") setStage("publish");
+  };
+  // Override: AI mark for the answer typed in the dialog; a different mark needs a reason.
+  const overrideAi: number | null =
+    selectedStudent === "Khadija"
+      ? overrideAnswer.trim() === "528"
+        ? 3
+        : 0
+      : selectedStudent === "Mariam"
+        ? 2
+        : otherAi === null
+          ? null
+          : overrideAnswer.trim() === "2/3 > 3/5"
+            ? 3
+            : 0;
+  const overrideNeedsReason = overrideAi !== null && overrideMark !== overrideAi;
+  // First visit to a paper's marks (for this verified answer) shows the AI grading progress.
+  const gradeKey = `${selectedStudent}|${selectedStudent === "Khadija" ? studentAnswer : otherAnswer}`;
+  const doPublish = () => {
+                        setPublished(true);
+                        logActivity("published", "Khadija", {
+                          EN: `Quiz 4 results published (${score}/25, ${percent}%)`,
+                          DE: `Ergebnisse von Quiz 4 veröffentlicht (${score}/25, ${percent} %)`,
+                        });
+                        if (shareParent) {
+                          logActivity("share", "Khadija", {
+                            EN: "Quiz 4 results shared with Khadija’s parent",
+                            DE: "Ergebnisse von Quiz 4 mit Khadijas Elternteil geteilt",
+                          });
+                        }
+                        addNotification(
+                          "student",
+                          {
+                            EN: "Quiz 4 results are ready",
+                            DE: "Die Ergebnisse von Quiz 4 sind bereit",
+                          },
+                          {
+                            EN: "Ms. Ashraf published your Quiz 4 feedback.",
+                            DE: "Frau Ashraf hat dein Feedback zu Quiz 4 veröffentlicht.",
+                          },
+                          { EN: "View results", DE: "Ergebnisse ansehen" },
+                          "feedback",
+                        );
+                        if (redFlagDecision === "confirmed") {
+                          addNotification(
+                            "student",
+                            {
+                              EN: "A practice plan just for you",
+                              DE: "Ein Übungsplan nur für dich",
+                            },
+                            {
+                              EN: "Comparing fractions needs a little more practice. Try the short lesson and quiz – you can do it!",
+                              DE: "Brüche vergleichen braucht noch etwas Übung. Probiere die kurze Lektion und das Quiz – du schaffst das!",
+                            },
+                            { EN: "Start practice", DE: "Übung starten" },
+                            "practice",
+                          );
+                        }
+                        if (shareParent && redFlagDecision === "confirmed") {
+                          addNotification(
+                            "parent",
+                            {
+                              EN: "Learning alert: comparing fractions",
+                              DE: "Lernhinweis: Brüche vergleichen",
+                            },
+                            {
+                              EN: "Ms. Ashraf confirmed that Khadija needs extra practice with comparing fractions.",
+                              DE: "Frau Ashraf hat bestätigt, dass Khadija beim Vergleichen von Brüchen mehr Übung braucht.",
+                            },
+                            { EN: "See what helps", DE: "Hilfe ansehen" },
+                            "summary",
+                          );
+                        }
+                        if (shareParent) {
+                          addNotification(
+                            "parent",
+                            {
+                              EN: "Khadija's Quiz 4 results are published",
+                              DE: "Khadijas Ergebnisse für Quiz 4 wurden veröffentlicht",
+                            },
+                            {
+                              EN: "Ms. Ashraf shared Khadija’s latest maths result.",
+                              DE: "Frau Ashraf hat Khadijas aktuelles Matheergebnis geteilt.",
+                            },
+                            { EN: "View summary", DE: "Zusammenfassung ansehen" },
+                            "summary",
+                          );
+                        }
+                        notify(
+                          shareParent
+                            ? "Results published and shared with parent."
+                            : "Results published to the student.",
+                        );
   };
   const dismissItem = () => {
     const previousMark = awardedMark;
@@ -3031,7 +3402,7 @@ function TeacherApp({
     setDismissed(true);
     setAwardedMark(null);
     setPublished(false);
-    logActivity("mark", "Khadija", {
+    const entry = logActivity("mark", "Khadija", {
       EN: "Quiz 4 · Q2: AI suggestion dismissed, item stays in the queue",
       DE: "Quiz 4 · A2: KI-Vorschlag verworfen, bleibt in der Warteschlange",
     });
@@ -3042,6 +3413,7 @@ function TeacherApp({
         setDismissed(false);
         setAwardedMark(previousMark);
         setPublished(wasPublished);
+        markActivityUndone(entry);
       },
     });
     setView("overview");
@@ -3086,34 +3458,64 @@ function TeacherApp({
     selectedStudent === "Khadija"
       ? studentAnswer
       : (classState.ocrValues[selectedStudent] ?? selectedEvidence.corrected);
+  // Each flagged reading: Khadija Q2 drives the Quiz 4 story; Mariam and Salma keep their single
+  // reading under their name; other readings (Khadija Q6) are stored under their own id.
+  const readingState = (item: FlaggedReading) => {
+    if (item.id === "khadija-q2") return { verified: ocrVerified, saved: studentAnswer };
+    const key = item.student === "Khadija" ? item.id : item.student;
+    return {
+      verified: verifiedStudents.includes(key as ReviewStudent),
+      saved: classState.ocrValues[key] ?? item.read,
+    };
+  };
+  const currentFlag =
+    flaggedReadings.find((item) => item.id === flagId && item.student === selectedStudent) ??
+    flaggedReadings.find((item) => item.student === selectedStudent) ??
+    flaggedReadings[1];
+  const currentFlagState = readingState(currentFlag);
   const ocrValue =
-    ocrDraft[selectedStudent] ?? (selectedOcrVerified ? savedOcr : selectedEvidence.extracted);
+    ocrDraft[currentFlag.id] ?? (currentFlagState.verified ? currentFlagState.saved : currentFlag.read);
+  const openFlag = (item: FlaggedReading) => {
+    setSelectedStudent(item.student as ReviewStudent);
+    setFlagId(item.id);
+    setStage("ocr");
+  };
   const verifyOcr = (goNext: boolean) => {
     const value = ocrValue.trim();
     if (!value) return;
-    if (selectedStudent === "Khadija") {
+    const item = currentFlag;
+    const before = readingState(item);
+    if (item.id === "khadija-q2") {
       setOcrVerified(true);
       if (value !== studentAnswer) setAwardedMark(null);
       setStudentAnswer(value);
     } else {
-      setVerifiedStudents([...new Set([...verifiedStudents, selectedStudent])]);
-      updateClassState((current) => ({
-        ocrValues: { ...current.ocrValues, [selectedStudent]: value },
-      }));
+      const key = item.student === "Khadija" ? item.id : item.student;
+      setVerifiedStudents([...new Set([...verifiedStudents, key as ReviewStudent])]);
+      updateClassState((current) => ({ ocrValues: { ...current.ocrValues, [key]: value } }));
     }
-    if (value !== savedOcr || !selectedOcrVerified)
-      logActivity("ocr", selectedStudent, {
+    const label = `${selectedExamLanguage === "DE" ? "A" : "Q"}${item.q} · ${item.task[selectedExamLanguage]}`;
+    if (value !== before.saved || !before.verified)
+      logActivity("ocr", item.student, {
         EN:
-          value === ocrReadAs
-            ? `Quiz 4 · ${selectedEvidence.question}: OCR reading ${ocrReadAs} confirmed`
-            : `Quiz 4 · ${selectedEvidence.question}: OCR ${ocrReadAs} corrected to ${value}`,
+          value === item.read
+            ? `Quiz 4 · ${label}: OCR reading ${item.read} confirmed`
+            : `Quiz 4 · ${label}: OCR ${item.read} corrected to ${value}`,
         DE:
-          value === ocrReadAs
-            ? `Quiz 4 · ${selectedEvidence.question}: OCR-Lesung ${ocrReadAs} bestätigt`
-            : `Quiz 4 · ${selectedEvidence.question}: OCR ${ocrReadAs} korrigiert zu ${value}`,
+          value === item.read
+            ? `Quiz 4 · ${label}: OCR-Lesung ${item.read} bestätigt`
+            : `Quiz 4 · ${label}: OCR ${item.read} korrigiert zu ${value}`,
       });
-    if (goNext) setStage("grade");
-    else notify(`OCR verified for ${selectedStudent}.`);
+    if (!goNext) {
+      notify(`OCR verified for ${item.student}.`);
+      return;
+    }
+    // Next flagged reading on this paper that is still unchecked; when none is left, go to marks.
+    const mine = flaggedReadings.filter((x) => x.student === item.student);
+    const after = [...mine.slice(mine.indexOf(item) + 1), ...mine.slice(0, mine.indexOf(item))];
+    const next = after.find((x) => !readingState(x).verified);
+    if (next) setFlagId(next.id);
+    else setStage("grade");
   };
 
   useEffect(() => {
@@ -3154,16 +3556,33 @@ function TeacherApp({
                 <div className="teacher-heading">
                   <div>
                     <p className="kicker">18 OCTOBER</p>
-                    <h1>Grade 4B assessment overview</h1>
-                    <p>{reviewCount} exams are waiting for review.</p>
+                    <h1>
+                      {classState.teacherClass === "4B"
+                        ? "Grade 4B assessment overview"
+                        : tx(
+                            `Grade ${classState.teacherClass} assessment overview`,
+                            `Bewertungsübersicht Klasse ${classState.teacherClass}`,
+                          )}
+                    </h1>
+                    <p>
+                      {classState.teacherClass === "4B"
+                        ? `${reviewCount} exams are waiting for review.`
+                        : classState.teacherClass === "4C"
+                          ? tx("Quiz 4 papers have not been uploaded yet.", "Die Quiz-4-Arbeiten wurden noch nicht hochgeladen.")
+                          : tx("No exams are waiting for review.", "Keine Arbeiten warten auf Prüfung.")}
+                    </p>
                   </div>
                   <div className="heading-actions">
                     <ClassPicker language={language} notify={common.notify} />
-                    <Button icon="review" onClick={() => openReview("Khadija")}>
-                      Open review queue
-                    </Button>
+                    {classState.teacherClass === "4B" && (
+                      <Button icon="review" onClick={() => openReview("Khadija")}>
+                        Open review queue
+                      </Button>
+                    )}
                   </div>
                 </div>
+                {classState.teacherClass === "4B" ? (
+                <>
                 <section className="metric-grid">
                   <article>
                     <span className="metric-icon gold">
@@ -3208,7 +3627,15 @@ function TeacherApp({
                     <div className="panel-head">
                       <div>
                         <p className="kicker">RANKED ATTENTION</p>
-                        <h2>Needs your decision</h2>
+                        <h2>
+                          Needs your decision{" "}
+                          <HelpTip language={language} topic={tx("Attention rank", "Rang in der Liste")}>
+                            {tx(
+                              "Papers are ranked by how much your decision can change the result: unclear handwriting and uncertain marks come first. The Why column gives the reason for each paper.",
+                              "Arbeiten sind danach geordnet, wie stark Ihre Entscheidung das Ergebnis ändern kann: unklare Schrift und unsichere Bewertungen zuerst. Die Spalte Begründung nennt den Grund.",
+                            )}
+                          </HelpTip>
+                        </h2>
                       </div>
                     </div>
                     <div className="review-table attention-table">
@@ -3286,18 +3713,11 @@ function TeacherApp({
                       {
                         en: "Check extracted text",
                         de: "Erkannten Text prüfen",
-                        count:
-                          (ocrVerified ? 0 : 1) +
-                          (["Mariam", "Salma"] as ReviewStudent[]).filter(
-                            (name) => !verifiedStudents.includes(name),
-                          ).length,
+                        count: flaggedReadings.filter((item) => !readingState(item).verified).length,
                         onClick: () =>
-                          openReview(
-                            !ocrVerified
-                              ? "Khadija"
-                              : !verifiedStudents.includes("Salma")
-                                ? "Salma"
-                                : "Mariam",
+                          openFlag(
+                            flaggedReadings.find((item) => !readingState(item).verified) ??
+                              flaggedReadings[0],
                           ),
                       },
                       {
@@ -3390,6 +3810,14 @@ function TeacherApp({
                   </article>
                   </div>
                 </section>
+                </>
+                ) : (
+                  <OtherClassOverview
+                    cls={classState.teacherClass as "4A" | "4C"}
+                    language={language}
+                    onPerformance={() => setView("insights")}
+                  />
+                )}
               </>
             )}
 
@@ -3427,6 +3855,34 @@ function TeacherApp({
                     <Status type="neutral">{examLanguageLabel}</Status>
                   </div>
                 </div>
+                <p className="review-context" aria-label={tx("You are reviewing", "Sie prüfen gerade")}>
+                  <span>
+                    <Icon name="person" size={16} /> <b>{selectedStudent}</b>
+                  </span>
+                  <span>{tx("Quiz 4 · Fractions and word problems", "Quiz 4 · Brüche und Sachaufgaben")}</span>
+                  <span>
+                    <Icon name="review" size={16} />{" "}
+                    <b>
+                      {stage === "ocr"
+                        ? `${selectedExamLanguage === "DE" ? "A" : "Q"}${currentFlag.q} · ${currentFlag.task[selectedExamLanguage]}`
+                        : stage === "grade"
+                          ? selectedStudent === "Khadija"
+                            ? `${selectedExamLanguage === "DE" ? "A" : "Q"}2 · 132 × 4`
+                            : selectedStudent === "Mariam"
+                              ? tx("Q5 · Share 20 apples", "A5 · Teile 20 Äpfel")
+                              : tx("Q7 · Compare 2/3 and 3/5", "A7 · Vergleiche 2/3 und 3/5")
+                          : stage === "redflag"
+                            ? tx("Q7 · Compare 2/3 and 3/5 (Quiz 2–4)", "A7 · Vergleiche 2/3 und 3/5 (Quiz 2–4)")
+                            : tx("All 8 questions · 25 marks", "Alle 8 Aufgaben · 25 Punkte")}
+                    </b>
+                  </span>
+                  <span>
+                    {tx(
+                      `Step ${workflowStages.indexOf(stage) + 1} of ${workflowStages.length}`,
+                      `Schritt ${workflowStages.indexOf(stage) + 1} von ${workflowStages.length}`,
+                    )}
+                  </span>
+                </p>
                 <div className="workflow-tabs">
                   {workflowStages.map((item, index) => (
                     <button
@@ -3446,6 +3902,14 @@ function TeacherApp({
                   ))}
                 </div>
 
+                {stage === "ocr" && (
+                  <OcrQueue
+                    language={language}
+                    currentId={currentFlag.id}
+                    stateOf={readingState}
+                    onOpen={openFlag}
+                  />
+                )}
                 {stage === "ocr" && (
                   <div className="review-layout">
                     <section className="scan-panel panel">
@@ -3475,85 +3939,17 @@ function TeacherApp({
                         </div>
                       </div>
                       <Status type="neutral">{examLanguageLabel}</Status>
-                      <div className="extracted-list">
-                        <div>
-                          <span>{selectedExamLanguage === "DE" ? "A1" : "Q1"} · 24 × 6</span>
-                          <strong>144</strong>
-                          <Status type="good">96% confidence</Status>
-                        </div>
-                        <div className="low-confidence">
-                          <span>{selectedEvidence.question}</span>
-                          <strong>
-                            {selectedOcrVerified ? savedOcr : selectedEvidence.extracted}
-                          </strong>
-                          <Status type="warn">{selectedEvidence.confidence} · Check answer</Status>
-                        </div>
-                        <div>
-                          <span>
-                            {selectedExamLanguage === "DE" ? "A3 · Färbe 3/4" : "Q3 · Shade 3/4"}
-                          </span>
-                          <strong>
-                            {selectedExamLanguage === "DE" ? "2/4 gefärbt" : "2/4 shaded"}
-                          </strong>
-                          <Status type="good">89% confidence</Status>
-                        </div>
-                      </div>
-                      <div className="ocr-fix">
-                        <label>
-                          Correct the flagged answer
-                          <input
-                            value={ocrValue}
-                            onChange={(event) =>
-                              setOcrDraft({ ...ocrDraft, [selectedStudent]: event.target.value })
-                            }
-                            onKeyDown={(event) => {
-                              if (event.key === "Enter") verifyOcr(true);
-                            }}
-                          />
-                        </label>
-                        <div className="template-chips" aria-label="Suggestions">
-                          {[...new Set([selectedEvidence.corrected, ocrReadAs])].map((option) => (
-                            <button
-                              type="button"
-                              key={option}
-                              className={ocrValue === option ? "selected" : ""}
-                              onClick={() => setOcrDraft({ ...ocrDraft, [selectedStudent]: option })}
-                            >
-                              {option}
-                              <small>
-                                {option === ocrReadAs ? "As read by AI" : "Suggested correction"}
-                              </small>
-                            </button>
-                          ))}
-                        </div>
-                        <p className="ocr-tip">
-                          <Icon name="idea" size={16} />
-                          Often confused in handwriting: 2 and 7, 1 and 7, 4 and 9. Press Enter to
-                          verify and go to the next flagged item.
-                        </p>
-                      </div>
-                      {selectedOcrVerified && (
-                        <div className="confirmed-box">
-                          <Icon name="check" />
-                          <div>
-                            <strong>OCR verified</strong>
-                            <p>The flagged answer is saved as {savedOcr}.</p>
-                          </div>
-                        </div>
-                      )}
-                      <div className="decision-actions">
-                        <Button icon="check" disabled={!ocrValue.trim()} onClick={() => verifyOcr(false)}>
-                          Verify OCR
-                        </Button>
-                        <Button
-                          icon="arrow"
-                          variant="secondary"
-                          disabled={!ocrValue.trim()}
-                          onClick={() => verifyOcr(true)}
-                        >
-                          Next flagged
-                        </Button>
-                      </div>
+                      <OcrCheck
+                        language={language}
+                        examLanguage={selectedExamLanguage}
+                        student={selectedStudent}
+                        current={currentFlag}
+                        value={ocrValue}
+                        setValue={(value) => setOcrDraft({ ...ocrDraft, [currentFlag.id]: value })}
+                        stateOf={readingState}
+                        onSelect={openFlag}
+                        onVerify={verifyOcr}
+                      />
                     </section>
                   </div>
                 )}
@@ -3577,20 +3973,39 @@ function TeacherApp({
                       />
                     </section>
                     <section className="decision-panel panel">
+                      {!gradedKeys.includes(gradeKey) ? (
+                        <GradingLoader
+                          language={language}
+                          who={selectedStudent}
+                          onDone={() => setGradedKeys((keys) => [...keys, gradeKey])}
+                        />
+                      ) : (
+                      <>
                       <div className="ai-title">
                         <span>
                           <Icon name="spark" />
                         </span>
                         <div>
-                          <p className="kicker">AI MARK PROPOSAL</p>
+                          <p className="kicker">
+                            AI MARK PROPOSAL{" "}
+                            <HelpTip language={language} topic={tx("AI suggestion", "KI-Vorschlag")}>
+                              {tx(
+                                "The mark the AI suggests from the marking scheme. Nothing reaches the student until you confirm, override or reject it.",
+                                "Die Bewertung, die die KI anhand des Bewertungsschemas vorschlägt. Nichts erreicht das Kind, bevor Sie bestätigen, ändern oder ablehnen.",
+                              )}
+                            </HelpTip>
+                          </p>
                           <h2>
                             {selectedStudent === "Khadija"
                               ? aiQ2 === 3
                                 ? "Award 3 of 3 marks"
                                 : "Award 0 of 3 marks"
-                              : selectedStudent === "Mariam"
-                                ? "Award 2 of 4 marks"
-                                : "Hold for teacher decision"}
+                              : otherAi === null
+                                ? tx("Hold for teacher decision", "Für Ihre Entscheidung zurückgehalten")
+                                : tx(
+                                    `Award ${otherAi} of ${otherQ.out} marks`,
+                                    `${otherAi} von ${otherQ.out} Punkten vergeben`,
+                                  )}
                           </h2>
                         </div>
                       </div>
@@ -3602,23 +4017,46 @@ function TeacherApp({
                           ? aiQ2 === 3
                             ? "The corrected answer 528 matches the expected result. The calculation is correct."
                             : `The answer ${studentAnswer} does not match the expected result 528.`
-                          : "The response contains partial evidence, but the reasoning is incomplete."}
+                          : selectedStudent === "Mariam"
+                            ? tx(
+                                "The answer 4 each is right, but no working is shown: 2 of 4 marks for the answer.",
+                                "Das Ergebnis je 4 stimmt, aber der Rechenweg fehlt: 2 von 4 Punkten für das Ergebnis.",
+                              )
+                            : otherAi === null
+                              ? tx(
+                                  "The answer could not be read. Check the text first, or enter a mark yourself.",
+                                  "Die Antwort war nicht lesbar. Prüfen Sie zuerst den Text oder geben Sie selbst eine Bewertung ein.",
+                                )
+                              : otherAi === 3
+                                ? tx("2/3 > 3/5 matches the model answer.", "2/3 > 3/5 entspricht der Musterlösung.")
+                                : tx(
+                                    `${otherAnswer} uses the wrong sign; the model answer is 2/3 > 3/5.`,
+                                    `${otherAnswer} hat das falsche Zeichen; die Musterlösung ist 2/3 > 3/5.`,
+                                  )}
                       </p>
                       <div className="rubric">
                         <div>
                           <span>Student answer</span>
-                          <b>{selectedStudent === "Khadija" ? studentAnswer : "See scan"}</b>
+                          <b>{selectedStudent === "Khadija" ? studentAnswer : otherAnswer}</b>
                         </div>
                         <div>
                           <span>AI mark</span>
-                          <b>{selectedStudent === "Khadija" ? `${aiQ2} / 3` : "2 / 4"}</b>
+                          <b>
+                            {selectedStudent === "Khadija"
+                              ? `${aiQ2} / 3`
+                              : otherAi === null
+                                ? "—"
+                                : `${otherAi} / ${otherQ.out}`}
+                          </b>
                         </div>
                         <div>
                           <span>Teacher mark</span>
                           <b>
                             {selectedStudent === "Khadija" && awardedMark !== null
                               ? `${awardedMark} / 3`
-                              : "Not confirmed"}
+                              : selectedStudent !== "Khadija" && otherTeacherMark !== undefined
+                                ? `${otherTeacherMark} / ${otherQ.out}`
+                                : "Not confirmed"}
                           </b>
                         </div>
                       </div>
@@ -3665,27 +4103,68 @@ function TeacherApp({
                           }}
                         />
                       </label>
+                      {selectedStudent !== "Khadija" && (
+                        <button
+                          type="button"
+                          className="link-button compare-link"
+                          onClick={() => {
+                            setByQuestion(otherQ.q as 5 | 7);
+                            setView("byquestion");
+                          }}
+                        >
+                          <Icon name="grid" size={16} />
+                          {tx(
+                            `Compare Q${otherQ.q} across the class`,
+                            `A${otherQ.q} in der ganzen Klasse vergleichen`,
+                          )}
+                        </button>
+                      )}
                       <div className="decision-actions">
-                        <Button icon="check" onClick={() => confirmMark(aiQ2, studentAnswer)}>
+                        <Button
+                          icon="check"
+                          disabled={selectedStudent !== "Khadija" && otherAi === null}
+                          onClick={() =>
+                            selectedStudent === "Khadija"
+                              ? confirmMark(aiQ2, studentAnswer)
+                              : confirmMark(otherAi ?? 0, otherAnswer)
+                          }
+                        >
                           Confirm AI mark
                         </Button>
                         <Button
                           icon="edit"
                           variant="secondary"
                           onClick={() => {
-                            setOverrideAnswer(studentAnswer);
-                            setOverrideMark(awardedMark ?? aiQ2);
+                            if (selectedStudent === "Khadija") {
+                              setOverrideAnswer(studentAnswer);
+                              setOverrideMark(awardedMark ?? aiQ2);
+                            } else {
+                              setOverrideAnswer(otherAnswer);
+                              setOverrideMark(otherTeacherMark ?? otherAi ?? 0);
+                            }
+                            setOverrideReason("");
+                            setOverrideError(false);
                             setModal(true);
                           }}
                         >
                           Override
                         </Button>
-                        {selectedStudent === "Khadija" && (
-                          <Button icon="close" variant="ghost" onClick={dismissItem}>
-                            Dismiss
-                          </Button>
-                        )}
+                        <Button
+                          icon="close"
+                          variant="ghost"
+                          onClick={selectedStudent === "Khadija" ? dismissItem : rejectOther}
+                        >
+                          Reject AI mark
+                        </Button>
                       </div>
+                      <p className="decision-help">
+                        {tx(
+                          "Confirm keeps the AI mark. Override lets you enter your own answer and mark. Reject removes the AI mark and keeps the paper in your queue.",
+                          "Bestätigen übernimmt die KI-Bewertung. Ändern lässt Sie Antwort und Punkte selbst eingeben. Ablehnen entfernt die KI-Bewertung; die Arbeit bleibt in Ihrer Warteschlange.",
+                        )}
+                      </p>
+                      </>
+                      )}
                     </section>
                   </div>
                 )}
@@ -3698,7 +4177,15 @@ function TeacherApp({
                       </span>
                       <div>
                         <p className="kicker">REPEATED LEARNING GAP</p>
-                        <h2>Fraction-comparison error</h2>
+                        <h2>
+                          Fraction-comparison error{" "}
+                          <HelpTip language={language} topic={tx("Red flag", "Warnhinweis")}>
+                            {tx(
+                              "The AI found the same mistake in several quizzes. If you confirm it, Khadija gets a short lesson and quiz, and her parent sees a learning alert if sharing is on.",
+                              "Die KI hat denselben Fehler in mehreren Quizzen gefunden. Wenn Sie bestätigen, bekommt Khadija eine kurze Lektion mit Quiz, und ihr Elternteil sieht einen Lernhinweis, wenn geteilt wird.",
+                            )}
+                          </HelpTip>
+                        </h2>
                       </div>
                     </div>
                     <p>
@@ -3724,50 +4211,21 @@ function TeacherApp({
                     </div>
                     {redFlagDecision && (
                       <Status type={redFlagDecision === "confirmed" ? "warn" : "neutral"}>
-                        Flag {redFlagDecision}
+                        {redFlagDecision === "confirmed"
+                          ? "Flag confirmed"
+                          : redFlagDecision === "dismissed"
+                            ? "Flag dismissed"
+                            : "Flag postponed"}
                       </Status>
                     )}
                     <div className="decision-actions">
-                      <Button
-                        icon="check"
-                        onClick={() => {
-                          setRedFlagDecision("confirmed");
-                          logActivity("redflag", "Khadija", {
-                            EN: "Fraction-comparison flag confirmed; practice assigned",
-                            DE: "Warnung „Brüche vergleichen“ bestätigt; Übung zugewiesen",
-                          });
-                          notify("Learning-gap flag confirmed.");
-                          setStage("publish");
-                        }}
-                      >
+                      <Button icon="check" onClick={() => decideRedFlag("confirmed")}>
                         Confirm
                       </Button>
-                      <Button
-                        icon="close"
-                        variant="secondary"
-                        onClick={() => {
-                          setRedFlagDecision("dismissed");
-                          logActivity("redflag", "Khadija", {
-                            EN: "Fraction-comparison flag dismissed",
-                            DE: "Warnung „Brüche vergleichen“ verworfen",
-                          });
-                          notify("Learning-gap flag dismissed.");
-                        }}
-                      >
+                      <Button icon="close" variant="secondary" onClick={() => decideRedFlag("dismissed")}>
                         Dismiss
                       </Button>
-                      <Button
-                        icon="clock"
-                        variant="ghost"
-                        onClick={() => {
-                          setRedFlagDecision("postponed");
-                          logActivity("redflag", "Khadija", {
-                            EN: "Fraction-comparison flag postponed",
-                            DE: "Warnung „Brüche vergleichen“ zurückgestellt",
-                          });
-                          notify("Learning-gap decision postponed.");
-                        }}
-                      >
+                      <Button icon="clock" variant="ghost" onClick={() => decideRedFlag("postponed")}>
                         Postpone
                       </Button>
                     </div>
@@ -3864,6 +4322,15 @@ function TeacherApp({
                         <small>Allow Khadija’s parent to see the published summary.</small>
                       </span>
                     </label>
+                    <p className="share-help">
+                      <HelpTip language={language} topic={tx("Share with parent", "Mit Eltern teilen")}>
+                        {tx(
+                          "When this is on, Khadija’s parent sees the published score, your note and ideas for helping at home. Khadija always sees her own results.",
+                          "Wenn dies an ist, sieht Khadijas Elternteil das veröffentlichte Ergebnis, Ihre Notiz und Ideen für zu Hause. Khadija sieht ihre Ergebnisse immer.",
+                        )}
+                      </HelpTip>
+                      <small>{tx("What does sharing mean?", "Was bedeutet Teilen?")}</small>
+                    </p>
                     {published && (
                       <div className="confirmed-box">
                         <Icon name="check" />
@@ -3876,86 +4343,34 @@ function TeacherApp({
                         </div>
                       </div>
                     )}
+                    {!published && (!ocrVerified || awardedMark === null) && (
+                      <ErrorNote
+                        action={
+                          <Button
+                            icon="arrow"
+                            variant="secondary"
+                            onClick={() => setStage(!ocrVerified ? "ocr" : "grade")}
+                          >
+                            {!ocrVerified ? tx("Go to step 1: Verify OCR", "Zu Schritt 1: OCR prüfen") : tx("Go to step 2: Review mark", "Zu Schritt 2: Bewertung prüfen")}
+                          </Button>
+                        }
+                      >
+                        {!ocrVerified
+                          ? tx(
+                              "Publishing is blocked: step 1, Verify OCR, is not finished. Check the flagged handwriting, then come back here.",
+                              "Veröffentlichen ist gesperrt: Schritt 1, OCR prüfen, ist nicht fertig. Prüfen Sie die markierte Schrift und kommen Sie dann zurück.",
+                            )
+                          : tx(
+                              "Publishing is blocked: step 2, Review mark, is not finished. Q2 has no confirmed mark yet.",
+                              "Veröffentlichen ist gesperrt: Schritt 2, Bewertung prüfen, ist nicht fertig. A2 hat noch keine bestätigte Bewertung.",
+                            )}
+                      </ErrorNote>
+                    )}
                     <Button
                       icon="check"
                       className="publish-button"
                       disabled={published || !ocrVerified || awardedMark === null}
-                      onClick={() => {
-                        setPublished(true);
-                        logActivity("published", "Khadija", {
-                          EN: `Quiz 4 results published (${score}/25, ${percent}%)`,
-                          DE: `Ergebnisse von Quiz 4 veröffentlicht (${score}/25, ${percent} %)`,
-                        });
-                        if (shareParent) {
-                          logActivity("share", "Khadija", {
-                            EN: "Quiz 4 results shared with Khadija’s parent",
-                            DE: "Ergebnisse von Quiz 4 mit Khadijas Elternteil geteilt",
-                          });
-                        }
-                        addNotification(
-                          "student",
-                          {
-                            EN: "Quiz 4 results are ready",
-                            DE: "Die Ergebnisse von Quiz 4 sind bereit",
-                          },
-                          {
-                            EN: "Ms. Ashraf published your Quiz 4 feedback.",
-                            DE: "Frau Ashraf hat dein Feedback zu Quiz 4 veröffentlicht.",
-                          },
-                          { EN: "View results", DE: "Ergebnisse ansehen" },
-                          "feedback",
-                        );
-                        if (redFlagDecision === "confirmed") {
-                          addNotification(
-                            "student",
-                            {
-                              EN: "A practice plan just for you",
-                              DE: "Ein Übungsplan nur für dich",
-                            },
-                            {
-                              EN: "Comparing fractions needs a little more practice. Try the short lesson and quiz – you can do it!",
-                              DE: "Brüche vergleichen braucht noch etwas Übung. Probiere die kurze Lektion und das Quiz – du schaffst das!",
-                            },
-                            { EN: "Start practice", DE: "Übung starten" },
-                            "practice",
-                          );
-                        }
-                        if (shareParent && redFlagDecision === "confirmed") {
-                          addNotification(
-                            "parent",
-                            {
-                              EN: "Learning alert: comparing fractions",
-                              DE: "Lernhinweis: Brüche vergleichen",
-                            },
-                            {
-                              EN: "Ms. Ashraf confirmed that Khadija needs extra practice with comparing fractions.",
-                              DE: "Frau Ashraf hat bestätigt, dass Khadija beim Vergleichen von Brüchen mehr Übung braucht.",
-                            },
-                            { EN: "See what helps", DE: "Hilfe ansehen" },
-                            "summary",
-                          );
-                        }
-                        if (shareParent) {
-                          addNotification(
-                            "parent",
-                            {
-                              EN: "Khadija's Quiz 4 results are published",
-                              DE: "Khadijas Ergebnisse für Quiz 4 wurden veröffentlicht",
-                            },
-                            {
-                              EN: "Ms. Ashraf shared Khadija’s latest maths result.",
-                              DE: "Frau Ashraf hat Khadijas aktuelles Matheergebnis geteilt.",
-                            },
-                            { EN: "View summary", DE: "Zusammenfassung ansehen" },
-                            "summary",
-                          );
-                        }
-                        notify(
-                          shareParent
-                            ? "Results published and shared with parent."
-                            : "Results published to the student.",
-                        );
-                      }}
+                      onClick={() => setConfirmPublish(true)}
                     >
                       {published ? "Published" : "Publish results"}
                     </Button>
@@ -3974,111 +4389,8 @@ function TeacherApp({
 
             {view === "insights" && (
               <>
-                <div className="teacher-heading">
-                  <div>
-                    <p className="kicker">GRADE 4B · 22 STUDENTS</p>
-                    <h1>Class learning insights</h1>
-                    <p>Quiz 4: Fractions and word problems</p>
-                  </div>
-                  <Button icon="book" onClick={() => notify("Practice set assigned to Grade 4B.")}>
-                    Assign practice set
-                  </Button>
-                </div>
-                <section className="insight-grid">
-                  <article className="panel class-progress">
-                    <div className="panel-head">
-                      <div>
-                        <p className="kicker">OVER FOUR QUIZZES</p>
-                        <h2>Class progress</h2>
-                      </div>
-                      <Status type="good">Up 12 points</Status>
-                    </div>
-                    <StairChart values={[59, 64, 67, 71]} label={translateText("Progress staircase", language)} />
-                    <div className="chart-labels">
-                      <span>Quiz 1</span>
-                      <span>Quiz 2</span>
-                      <span>Quiz 3</span>
-                      <span>Quiz 4</span>
-                    </div>
-                  </article>
-                  <article className="panel">
-                    <p className="kicker">SKILL BREAKDOWN</p>
-                    <h2>Where support is needed</h2>
-                    <div className="skill-row">
-                      <span>
-                        <Icon name="warning" /> Comparing fractions
-                      </span>
-                      <strong>59% secure</strong>
-                    </div>
-                    <div className="bar bad-bar">
-                      <i style={{ width: "59%" }} />
-                    </div>
-                    <div className="skill-row">
-                      <span>
-                        <Icon name="idea" /> Explaining working
-                      </span>
-                      <strong>73% secure</strong>
-                    </div>
-                    <div className="bar warn-bar">
-                      <i style={{ width: "73%" }} />
-                    </div>
-                    <div className="skill-row">
-                      <span>
-                        <Icon name="check" /> Multiplication facts
-                      </span>
-                      <strong>91% secure</strong>
-                    </div>
-                    <div className="bar good-bar">
-                      <i style={{ width: "91%" }} />
-                    </div>
-                  </article>
-                </section>
-                <section className="panel students-panel">
-                  <div className="panel-head">
-                    <div>
-                      <p className="kicker">STUDENT SNAPSHOT</p>
-                      <h2>Students requiring support</h2>
-                    </div>
-                  </div>
-                  {[
-                    "Khadija|Comparing fractions",
-                    "Mariam|Showing working",
-                    "Salma|Word problems",
-                    "Laila|On track",
-                    "Nour|On track",
-                  ].map((item, index) => {
-                    const [name, focus] = item.split("|");
-                    const displayScore =
-                      name === "Khadija"
-                        ? score === null
-                          ? "Not graded"
-                          : `${percent}%`
-                        : ["", "76%", "60%", "84%", "88%"][index];
-                    return (
-                      <div className="student-snapshot" key={name}>
-                        <span className="student-cell">
-                          <b>{name.slice(0, 2).toUpperCase()}</b>
-                          <i>
-                            <strong>{name}</strong>
-                            <small>{focus}</small>
-                          </i>
-                        </span>
-                        <strong>{displayScore}</strong>
-                        <Status type={index < 3 ? "warn" : "good"}>
-                          {index < 3 ? "Plan support" : "On track"}
-                        </Status>
-                        <Button
-                          icon="message"
-                          variant="ghost"
-                          onClick={() => setNoteFor(name)}
-                        >
-                          Add note
-                        </Button>
-                      </div>
-                    );
-                  })}
-                </section>
-                <QuizMonitor khadija={khadijaLive} {...common} />
+                <ClassPerformance khadija={khadijaLive} language={language} onOpenStudent={openRecord} />
+                {classState.teacherClass === "4B" && <QuizMonitor khadija={khadijaLive} {...common} />}
               </>
             )}
 
@@ -4107,7 +4419,14 @@ function TeacherApp({
                 {...common}
               />
             )}
-            {view === "byquestion" && <QuestionReview {...common} />}
+            {view === "byquestion" && (
+              <QuestionReview
+                key={byQuestion}
+                initialQuestion={byQuestion}
+                onOpenReview={(name) => openReview(name as ReviewStudent, "grade")}
+                {...common}
+              />
+            )}
             {view === "gradebook" && <Gradebook khadija={khadijaLive} {...common} />}
             {view === "skilltree" && <SkillTree onOpenStudent={openRecord} {...common} />}
             {view === "messages" && (
@@ -4129,10 +4448,49 @@ function TeacherApp({
           </main>
         </div>
 
+        {confirmPublish && (
+          <ConfirmDialog
+            language={language}
+            icon="check"
+            title={tx("Publish Khadija’s Quiz 4 results?", "Khadijas Ergebnisse für Quiz 4 veröffentlichen?")}
+            confirmLabel={tx("Publish", "Veröffentlichen")}
+            onCancel={() => setConfirmPublish(false)}
+            onConfirm={() => {
+              setConfirmPublish(false);
+              doPublish();
+            }}
+          >
+            <dl className="confirm-facts">
+              <div>
+                <dt>{tx("Score", "Ergebnis")}</dt>
+                <dd>
+                  {score}/25 ({percent}%)
+                </dd>
+              </div>
+              <div>
+                <dt>{tx("Share with parent", "Mit Eltern teilen")}</dt>
+                <dd>
+                  {shareParent
+                    ? tx("On – the parent will be notified", "An – das Elternteil wird benachrichtigt")
+                    : tx("Off – only Khadija sees the results", "Aus – nur Khadija sieht die Ergebnisse")}
+                </dd>
+              </div>
+              <div>
+                <dt>{tx("Learning support", "Lernhilfe")}</dt>
+                <dd>
+                  {redFlagDecision === "confirmed"
+                    ? tx("Practice plan is sent to Khadija", "Übungsplan wird an Khadija gesendet")
+                    : tx("No practice plan", "Kein Übungsplan")}
+                </dd>
+              </div>
+            </dl>
+            <p>{tx("Khadija is notified straight away.", "Khadija wird sofort benachrichtigt.")}</p>
+          </ConfirmDialog>
+        )}
         {modal && (
           <div className="modal-backdrop" role="dialog" aria-modal="true">
             <div className="modal">
-              <button className="modal-close" onClick={() => setModal(false)} aria-label="Close">
+              <button className="modal-close" onClick={() => setModal(false)} aria-label="Close" title={tx("Close", "Schließen")}>
                 <Icon name="close" />
               </button>
               <span className="modal-icon">
@@ -4155,12 +4513,38 @@ function TeacherApp({
                   value={overrideMark}
                   onChange={(e) => setOverrideMark(Number(e.target.value))}
                 >
-                  <option value={3}>3 / 3</option>
-                  <option value={2}>2 / 3</option>
-                  <option value={1}>1 / 3</option>
-                  <option value={0}>0 / 3</option>
+                  {Array.from({ length: (selectedStudent === "Khadija" ? 3 : otherQ.out) + 1 }, (_, i) => {
+                    const out = selectedStudent === "Khadija" ? 3 : otherQ.out;
+                    return (
+                      <option key={i} value={out - i}>
+                        {out - i} / {out}
+                      </option>
+                    );
+                  })}
                 </select>
               </label>
+              <label>
+                {overrideNeedsReason
+                  ? tx("Reason for changing the AI mark (required)", "Grund für die Änderung der KI-Bewertung (Pflicht)")
+                  : tx("Reason (optional)", "Grund (optional)")}
+                <textarea
+                  rows={2}
+                  value={overrideReason}
+                  onChange={(e) => {
+                    setOverrideReason(e.target.value);
+                    setOverrideError(false);
+                  }}
+                  placeholder={tx("e.g. Method correct, small copying slip", "z. B. Rechenweg richtig, kleiner Abschreibfehler")}
+                />
+              </label>
+              {overrideError && (
+                <ErrorNote>
+                  {tx(
+                    `The reason is empty. Your mark (${overrideMark}) differs from the AI mark (${overrideAi}), so write a short reason, then press Save override.`,
+                    `Der Grund fehlt. Ihre Bewertung (${overrideMark}) weicht von der KI-Bewertung (${overrideAi}) ab. Schreiben Sie einen kurzen Grund und drücken Sie dann Änderung speichern.`,
+                  )}
+                </ErrorNote>
+              )}
               <div className="modal-actions">
                 <Button icon="speaker" variant="ghost" className="modal-read" onClick={requestReadAloud}>
                   Read aloud
@@ -4168,7 +4552,16 @@ function TeacherApp({
                 <Button icon="close" variant="ghost" onClick={() => setModal(false)}>
                   Cancel
                 </Button>
-                <Button icon="check" onClick={() => confirmMark(overrideMark, overrideAnswer)}>
+                <Button
+                  icon="check"
+                  onClick={() => {
+                    if (overrideNeedsReason && !overrideReason.trim()) {
+                      setOverrideError(true);
+                      return;
+                    }
+                    confirmMark(overrideMark, overrideAnswer, overrideReason);
+                  }}
+                >
                   Save override
                 </Button>
               </div>
@@ -4182,7 +4575,7 @@ function TeacherApp({
           <>
             <div className="drawer-scrim" onClick={() => setDrawer(false)} />
             <aside className="drawer">
-              <button className="modal-close" onClick={() => setDrawer(false)} aria-label="Close">
+              <button className="modal-close" onClick={() => setDrawer(false)} aria-label="Close" title={tx("Close", "Schließen")}>
                 <Icon name="close" />
               </button>
               <p className="kicker">EXAM CONTEXT</p>
@@ -4226,8 +4619,8 @@ function TeacherApp({
 function ParentTracker({ published, language }: { published: boolean; language: Language }) {
   const labels =
     language === "DE"
-      ? ["Eingereicht", "Lehrerin prüft", "Veröffentlicht"]
-      : ["Submitted", "Teacher reviewing", "Published"];
+      ? ["Gesendet", "Lehrerin prüft", "Ergebnis bereit"]
+      : ["Sent", "Teacher checking", "Results ready"];
   const stage = published ? 2 : 1;
   return (
     <div
@@ -4281,9 +4674,10 @@ function ParentApp({
 }) {
   const [tab, setTab] = useState<ParentTab>("overview");
   const [child, setChild] = useState<Child>("Khadija");
+  useScrollTopOn(`${child}-${tab}`);
   const classState = useClassState();
   const visible = published && shareParent && awardedMark !== null;
-  const quizStatus = published && !shareParent ? "Results not shared yet" : "Teacher reviewing";
+  const quizStatus = published && !shareParent ? "Results not shared yet" : "Teacher checking";
   const score = awardedMark === null ? null : 14 + awardedMark;
   const percent = score === null ? null : Math.round((score / 25) * 100);
   const quiz: ParentQuiz = {
@@ -4615,7 +5009,7 @@ export default function App() {
   const [awardedMark, setAwardedMark] = useState<number | null>(null);
   const [studentAnswer, setStudentAnswer] = useState("528");
   const [teacherFeedback, setTeacherFeedback] = useState(
-    "Strong multiplication. Practice comparing fractions with visual models.",
+    "Strong multiplication. Practice comparing fractions with drawings.",
   );
   const [redFlagDecision, setRedFlagDecision] = useState<
     "confirmed" | "dismissed" | "postponed" | null
@@ -4629,6 +5023,7 @@ export default function App() {
   const [reminderSent, setReminderSent] = useState(false);
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
   const [notificationCenterOpen, setNotificationCenterOpen] = useState(false);
+  useScrollTopOn(`${role}-${notificationCenterOpen}`);
   const [navigationRequest, setNavigationRequest] = useState<NavigationRequest>(null);
   const [toast, setToast] = useState<ToastState | null>(null);
   const addNotification: AddNotification = (targetRole, title, message, action, target) => {
@@ -4677,7 +5072,7 @@ export default function App() {
     );
   useEffect(() => {
     if (!toast) return;
-    const id = window.setTimeout(() => setToast(null), 4200);
+    const id = window.setTimeout(() => setToast(null), toast.actionLabel ? 9000 : 4200);
     return () => window.clearTimeout(id);
   }, [toast]);
   useEffect(() => {
@@ -4828,6 +5223,7 @@ export default function App() {
           <button
             onClick={() => setToast(null)}
             aria-label={language === "DE" ? "Benachrichtigung schließen" : "Close notification"}
+            title={language === "DE" ? "Benachrichtigung schließen" : "Close notification"}
           >
             <Icon name="close" size={17} />
           </button>

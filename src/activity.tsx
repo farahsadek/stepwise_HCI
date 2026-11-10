@@ -26,6 +26,8 @@ export type ActivityEntry = {
   student: string;
   detail: Text;
   when: Text;
+  /** Set when the teacher pressed Undo: the entry stays visible, struck through. */
+  undone?: boolean;
 };
 
 const kindLabels: Record<ActivityKind, Text> = {
@@ -102,8 +104,9 @@ export function logActivity(
   student: string,
   detail: Text,
   by?: "teacher" | "student" | "parent",
-) {
+): number {
   const now = new Date();
+  const id = nextId++;
   const clock = now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
   const who =
     by ??
@@ -114,7 +117,7 @@ export function logActivity(
         : "teacher");
   entries = [
     {
-      id: nextId++,
+      id,
       kind,
       actor: who === "student" ? student : who === "parent" ? PARENT : TEACHER,
       actorRole: who === "student" ? studentRole : who === "parent" ? parentRole : teacherRole,
@@ -124,6 +127,13 @@ export function logActivity(
     },
     ...entries,
   ];
+  listeners.forEach((listener) => listener());
+  return id;
+}
+
+/** Nielsen #3: an undone decision stays in the log, marked as undone. */
+export function markActivityUndone(id: number) {
+  entries = entries.map((entry) => (entry.id === id ? { ...entry, undone: true } : entry));
   listeners.forEach((listener) => listener());
 }
 
@@ -139,14 +149,17 @@ function useEntries() {
 
 function ActivityRow({ entry, language }: { entry: ActivityEntry; language: ActivityLang }) {
   return (
-    <div className="activity-row">
+    <div className={`activity-row ${entry.undone ? "undone" : ""}`}>
       <time>{entry.when[language]}</time>
       <span className="activity-who">
         <strong>{typeof entry.actor === "string" ? entry.actor : entry.actor[language]}</strong>
         <small>{entry.actorRole[language]}</small>
       </span>
       <span className={`activity-kind ${entry.kind}`}>{kindLabels[entry.kind][language]}</span>
-      <span className="activity-detail">{entry.detail[language]}</span>
+      <span className="activity-detail">
+        {entry.detail[language]}
+        {entry.undone && <b className="undone-tag">{language === "DE" ? " · rückgängig gemacht" : " · undone"}</b>}
+      </span>
     </div>
   );
 }

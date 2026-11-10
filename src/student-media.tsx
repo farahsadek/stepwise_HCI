@@ -1,3 +1,4 @@
+import { useEscape } from "./heuristics";
 import { useEffect, useRef, useState, type CSSProperties } from "react";
 
 type Lang = "EN" | "DE";
@@ -70,6 +71,7 @@ export function CameraCapture({
 }) {
   const t = (en: string, de: string) => (language === "DE" ? de : en);
   const videoRef = useRef<HTMLVideoElement>(null);
+  useEscape(true, onClose);
   const [state, setState] = useState<"starting" | "live" | "unavailable">("starting");
 
   useEffect(() => {
@@ -113,7 +115,7 @@ export function CameraCapture({
   return (
     <div className="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="camera-title">
       <div className="modal camera-modal">
-        <button className="modal-close" onClick={onClose} aria-label={t("Close", "Schließen")}>
+        <button className="modal-close" onClick={onClose} aria-label={t("Close", "Schließen")} title={t("Close", "Schließen")}>
           {closeIcon}
         </button>
         <h2 id="camera-title">{t("Take a photo of your page", "Fotografiere deine Seite")}</h2>

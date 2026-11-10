@@ -6134,3 +6134,1238 @@ html[data-contrast="high"] .student-shell .chart-end-label {
     clip: rect(0 0 0 0);
   }
 }
+
+/* =====================================================================
+   Responsive layout: fill the screen on desktops, laptops, tablets, phones.
+   Kept last so it overrides the earlier fixed widths.
+   ===================================================================== */
+:root {
+  /* Side gutter grows with the screen: 16px on phones up to 48px on wide screens. */
+  --page-gutter: clamp(16px, 3vw, 48px);
+}
+
+/* ---------- Login ---------- */
+.login {
+  min-height: 100dvh;
+}
+@media (min-width: 761px) {
+  .login-art {
+    position: sticky;
+    top: 0;
+    height: 100dvh;
+  }
+}
+/* The form scrolls with the page instead of inside its own box (keypad was cut off). */
+.auth-panel,
+.login-panel.auth-panel {
+  max-height: none;
+  overflow: visible;
+}
+.login-panel {
+  width: min(100%, 760px);
+  max-width: 760px;
+  justify-self: center;
+  padding-inline: clamp(22px, 5vw, 80px);
+}
+/* Short laptop screens: tighten vertical spacing so the whole form fits. */
+@media (min-width: 761px) and (max-height: 900px) {
+  .login-panel {
+    padding-block: 24px;
+  }
+  .login-panel .eyebrow {
+    margin-top: 22px;
+  }
+  .login h1 {
+    font-size: clamp(34px, 4.4vh, 52px);
+  }
+}
+
+/* ---------- Student ---------- */
+.student-main,
+.a11y-toolbar {
+  width: 100%;
+  max-width: 1320px;
+  padding-inline: var(--page-gutter);
+}
+.student-main {
+  margin-inline: auto;
+}
+/* Tab bar: shares the width evenly instead of 150px per tab (overflowed on tablets). */
+@media (min-width: 761px) {
+  .student-nav {
+    padding-inline: var(--page-gutter);
+    gap: clamp(4px, 1.2vw, 18px);
+  }
+  .student-nav button {
+    min-width: 0;
+    flex: 0 1 170px;
+    padding-inline: clamp(6px, 1.2vw, 22px);
+  }
+}
+@media (min-width: 761px) and (max-width: 960px) {
+  .student-nav {
+    height: 76px;
+  }
+  .student-nav button {
+    flex-direction: column;
+    gap: 2px;
+  }
+}
+/* Phones: bottom bar scrolls sideways when the tabs do not fit; nothing is cut off. */
+@media (max-width: 760px) {
+  .student-nav {
+    justify-content: flex-start;
+    overflow-x: auto;
+    scroll-snap-type: x proximity;
+    scrollbar-width: none;
+  }
+  .student-nav::-webkit-scrollbar {
+    display: none;
+  }
+  .student-nav button {
+    flex: 1 0 64px;
+    scroll-snap-align: center;
+    white-space: nowrap;
+    padding-inline: 8px;
+  }
+}
+
+/* ---------- Parent ---------- */
+.parent-main {
+  width: min(1320px, 100%);
+  padding-inline: var(--page-gutter);
+}
+@media (min-width: 1500px) {
+  .parent-main {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+@media (max-width: 760px) {
+  .parent-main {
+    width: 100%;
+    max-width: 640px;
+  }
+}
+
+/* ---------- Teacher ---------- */
+.teacher-main {
+  width: 100%;
+  max-width: 1680px;
+  padding-inline: var(--page-gutter);
+}
+.metric-grid {
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+}
+/* Tablets and small laptops: the sidebar becomes a narrow icon rail. */
+@media (min-width: 761px) and (max-width: 1180px) {
+  .teacher-shell {
+    grid-template-columns: 76px minmax(0, 1fr);
+  }
+  .teacher-side {
+    padding: 20px 10px;
+    align-items: center;
+  }
+  .teacher-side .logo strong,
+  .teacher-side .side-bottom {
+    display: none;
+  }
+  .teacher-side .logo {
+    padding: 0 0 26px;
+  }
+  .teacher-side nav button {
+    position: relative;
+    justify-content: center;
+    width: 52px;
+    padding: 0;
+    font-size: 0;
+  }
+  .teacher-side nav button svg {
+    flex: 0 0 auto;
+  }
+  .teacher-side nav button b {
+    position: absolute;
+    top: 2px;
+    right: 0;
+    font-size: 11px;
+  }
+}
+/* Phones: the 10-item bottom bar scrolls sideways (the last items were unreachable). */
+@media (max-width: 760px) {
+  .teacher-side nav {
+    overflow-x: auto;
+    scroll-snap-type: x proximity;
+    scrollbar-width: none;
+  }
+  .teacher-side nav::-webkit-scrollbar {
+    display: none;
+  }
+  .teacher-side nav button {
+    flex: 1 0 76px;
+    scroll-snap-align: center;
+  }
+}
+
+/* ---------- Top bar on small phones ---------- */
+@media (max-width: 420px) {
+  .topbar {
+    padding-inline: 12px;
+  }
+  .top-actions {
+    gap: 6px;
+  }
+  .lang-switch button {
+    min-width: 30px;
+  }
+}
+@media (max-width: 380px) {
+  .topbar .logo strong {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+  }
+}
+
+/* ---------- Wide workflow tabs scroll instead of pushing the page ---------- */
+.workflow-tabs {
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+.workflow-tabs button {
+  flex: 0 0 auto;
+}
+
+/* ---------- Small-phone overflow fixes ---------- */
+.review-layout > *,
+.teacher-columns > * {
+  min-width: 0;
+}
+.scan-toolbar {
+  flex-wrap: wrap;
+  gap: 4px 12px;
+}
+.student-main .status {
+  max-width: 100%;
+  white-space: normal;
+}
+
+/* Attention table: when rows stack (≤ 900px) the column header row has nothing to label. */
+@media (max-width: 900px) {
+  .attention-table .table-head {
+    display: none;
+  }
+}
+
+/* Wide but short screens (most laptops): keypad sits beside the username and PIN,
+   so the whole login form fits without scrolling. */
+@media (min-width: 1100px) and (max-height: 900px) {
+  .auth-form:has(> .pin-keypad) {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(250px, 300px);
+    grid-template-rows: auto auto 1fr;
+    column-gap: 28px;
+    align-items: start;
+  }
+  .auth-form:has(> .pin-keypad) > :not(.pin-keypad) {
+    grid-column: 1;
+  }
+  .auth-form:has(> .pin-keypad) > .pin-keypad {
+    grid-column: 2;
+    grid-row: 1 / span 3;
+    margin: 0;
+    width: 100%;
+  }
+  .auth-form:has(> .pin-keypad) > .auth-actions {
+    align-self: end;
+    grid-template-columns: 1fr;
+    gap: 8px;
+  }
+}
+
+/* Very wide screens: the student page uses more of the width. */
+@media (min-width: 1700px) {
+  .student-main,
+  .a11y-toolbar {
+    max-width: 1480px;
+  }
+}
+/* Desktop sidebar: long German labels wrap inside the column instead of widening the buttons. */
+@media (min-width: 1181px) {
+  .teacher-side nav {
+    min-width: 0;
+  }
+  .teacher-side nav button {
+    min-width: 0;
+    max-width: 100%;
+  }
+}
+
+/* ---------- Logo: sprout on the step ---------- */
+.logo {
+  gap: 10px;
+}
+.logo-mark {
+  width: 36px;
+  height: 36px;
+  flex: 0 0 auto;
+  color: var(--ink);
+  overflow: visible;
+}
+.logo-mark-lines {
+  stroke-width: 2.5;
+}
+/* Login card: the largest version. */
+.login-panel > .logo .logo-mark {
+  width: 44px;
+  height: 44px;
+}
+/* Teacher and parent: calmer, finer outline. */
+.teacher-shell .logo-mark-lines,
+.parent-shell .logo-mark-lines,
+.topbar.teacher .logo-mark-lines,
+.topbar.parent .logo-mark-lines {
+  stroke-width: 2;
+}
+/* Teacher sidebar is sage, like the leaves: the mark sits on a small white tile. */
+.teacher-side .logo-mark {
+  width: 40px;
+  height: 40px;
+  padding: 4px;
+  background: var(--white);
+  border: 1px solid var(--ink);
+  border-radius: 10px;
+  overflow: hidden;
+}
+/* The leaves grow in once on the login page. */
+@keyframes logo-leaf-grow {
+  from {
+    transform: scale(0);
+  }
+  to {
+    transform: scale(1);
+  }
+}
+.login .logo-leaf {
+  transform-origin: 32px 14px;
+  animation: logo-leaf-grow 0.6s cubic-bezier(0.3, 1.4, 0.5, 1) 0.25s both;
+}
+.login .logo-leaf-right {
+  transform-origin: 32px 11px;
+  animation-delay: 0.45s;
+}
+@media (prefers-reduced-motion: reduce) {
+  .login .logo-leaf {
+    animation: none;
+  }
+}
+
+/* ---------- C8 + C10: OCR confidence alerts and correction shortcuts ---------- */
+.ocr-queue {
+  display: grid;
+  gap: 10px;
+  margin-bottom: 18px;
+  padding: 14px 18px;
+}
+.ocr-queue-head h2 {
+  margin-top: 2px;
+  font-size: 18px;
+}
+.ocr-queue-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.ocr-queue-list button {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 4px 10px;
+  align-items: center;
+  width: 100%;
+  min-height: 64px;
+  padding: 10px 12px;
+  text-align: left;
+  color: var(--ink);
+  background: #fff;
+  border: 1px solid rgba(53, 67, 61, 0.22);
+  border-radius: 8px;
+}
+.ocr-queue-list button .status {
+  grid-column: 1 / -1;
+  justify-self: start;
+}
+.ocr-queue-list button:hover {
+  border-color: var(--ink);
+}
+.ocr-queue-list button.active {
+  border: 2px solid var(--ink);
+  background: #fbf6e6;
+}
+.ocr-queue-list button.done {
+  background: #f3f6f2;
+}
+.ocr-queue-who {
+  display: grid;
+  min-width: 0;
+}
+.ocr-queue-who small {
+  color: rgba(53, 67, 61, 0.72);
+}
+.ocr-confidence {
+  display: grid;
+  place-items: center;
+  min-width: 46px;
+  height: 30px;
+  font-weight: 700;
+  font-size: 14px;
+  border-radius: 6px;
+  border: 1px solid rgba(53, 67, 61, 0.3);
+}
+.ocr-confidence.low {
+  background: #f8dcc0;
+}
+.ocr-confidence.mid {
+  background: #f5ebc8;
+}
+.extracted-list > button {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  gap: 12px;
+  align-items: center;
+  width: 100%;
+  padding: 12px;
+  font: inherit;
+  text-align: left;
+  color: var(--ink);
+  border: 1px solid rgba(53, 67, 61, 0.42);
+  border-radius: 8px;
+}
+.extracted-list > button.is-current {
+  border: 2px solid var(--ink);
+  box-shadow: inset 4px 0 0 #c9a24a;
+}
+.ocr-flag-count {
+  font-size: 13px;
+  font-weight: 700;
+}
+.ocr-read-as {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  font-size: 14px;
+}
+.ocr-read-as small {
+  flex-basis: 100%;
+  color: rgba(53, 67, 61, 0.75);
+}
+.ocr-chars {
+  display: inline-flex;
+  gap: 1px;
+  font: 600 20px/1 "Kalam", cursive;
+}
+.ocr-chars mark {
+  padding: 2px 3px;
+  color: var(--ink);
+  background: transparent;
+  border-radius: 4px;
+}
+.ocr-chars mark.unsure {
+  background: #f8dcc0;
+  outline: 2px dashed #b4652a;
+  outline-offset: -1px;
+}
+.ocr-shortcuts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 16px;
+  font-size: 12px;
+  color: rgba(53, 67, 61, 0.8);
+}
+.ocr-shortcuts kbd {
+  display: inline-block;
+  min-width: 20px;
+  padding: 1px 5px;
+  font: 600 11px/1.5 ui-monospace, monospace;
+  text-align: center;
+  background: #fff;
+  border: 1px solid rgba(53, 67, 61, 0.35);
+  border-bottom-width: 2px;
+  border-radius: 4px;
+}
+.ocr-last-note,
+.decision-help {
+  margin-top: 8px;
+  font-size: 13px;
+  color: rgba(53, 67, 61, 0.75);
+}
+.decision-actions .ocr-prev svg {
+  transform: rotate(180deg);
+}
+@media (max-width: 760px) {
+  .extracted-list > button {
+    grid-template-columns: 1fr auto;
+  }
+}
+
+/* ---------- C12: grade review ---------- */
+.link-button.compare-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  justify-self: start;
+  margin-top: 10px;
+  padding: 0;
+  font-weight: 700;
+  color: var(--ink);
+  background: none;
+  border: 0;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+/* ---------- C15 + C16: review by question, rule reuse ---------- */
+.group-students > .mark-chip,
+.group-students > .mark-edit {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 32px;
+  padding: 4px 8px;
+  font-size: 13px;
+  color: var(--ink);
+  background: #f3f2ec;
+  border: 1px solid rgba(53, 67, 61, 0.2);
+  border-radius: 4px;
+}
+.group-students > .mark-chip:hover {
+  border-color: var(--ink);
+}
+.group-students > .mark-chip.odd {
+  background: #fff1cf;
+  border-color: #c9a24a;
+  font-weight: 700;
+}
+.group-students > .mark-chip.edited {
+  border-style: dashed;
+}
+.mark-chip small {
+  color: rgba(53, 67, 61, 0.7);
+}
+.mark-edit select {
+  min-height: 28px;
+  font: inherit;
+}
+.rule-panel .confirmed-box .button {
+  margin-top: 8px;
+}
+.rule-picker {
+  grid-column: 1 / -1;
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid rgba(53, 67, 61, 0.2);
+  border-radius: 8px;
+}
+.rule-picker legend {
+  padding: 0 4px;
+  font-size: 13px;
+  font-weight: 700;
+}
+.uses-rules {
+  display: block;
+  font-size: 12px;
+  color: rgba(53, 67, 61, 0.75);
+}
+.saved-rule small {
+  color: rgba(53, 67, 61, 0.72);
+}
+.teacher-side nav button svg {
+  flex: 0 0 auto;
+}
+
+/* ---------- Shared helpers ---------- */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+.icon-button {
+  display: inline-grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  color: var(--ink);
+  background: #fff;
+  border: 1px solid rgba(53, 67, 61, 0.25);
+  border-radius: 8px;
+}
+.icon-button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.link-button {
+  padding: 0;
+  font: inherit;
+  font-weight: 700;
+  color: var(--ink);
+  background: none;
+  border: 0;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+/* ---------- Class performance ---------- */
+.class-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 4px 0 18px;
+}
+.class-tabs button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 40px;
+  padding: 0 14px;
+  font-weight: 700;
+  color: var(--ink);
+  background: #fff;
+  border: 1px solid rgba(53, 67, 61, 0.3);
+  border-radius: 8px;
+}
+.class-tabs button.active {
+  background: #dfe9e3;
+  border-color: var(--ink);
+}
+.class-kpis {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 16px;
+  margin-bottom: 18px;
+}
+.class-kpis .panel {
+  display: grid;
+  gap: 6px;
+  align-content: start;
+  padding: 16px 18px;
+}
+.class-kpis strong {
+  font-size: 22px;
+}
+.class-kpis .status {
+  justify-self: start;
+}
+.class-trend,
+.insight-grid > .panel {
+  min-width: 0;
+  padding: 18px 20px;
+}
+.insight-grid {
+  margin-bottom: 18px;
+}
+.concept-rank {
+  display: grid;
+  gap: 14px;
+  margin: 12px 0 0;
+  padding-left: 20px;
+  list-style: decimal;
+}
+.concept-rank li > div {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 4px 12px;
+}
+.concept-rank li span,
+.concept-rank li small {
+  font-size: 13px;
+  color: rgba(53, 67, 61, 0.78);
+}
+.concept-bar {
+  display: block;
+  height: 8px;
+  margin: 6px 0 4px;
+  overflow: hidden;
+  background: rgba(53, 67, 61, 0.1);
+  border-radius: 4px;
+}
+.concept-bar b {
+  display: block;
+  height: 100%;
+  background: #c9a24a;
+  border-radius: 4px;
+}
+.missed-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) 1fr auto;
+  gap: 12px;
+  align-items: center;
+  padding: 10px 0;
+  font-size: 14px;
+  border-top: 1px solid rgba(53, 67, 61, 0.12);
+}
+.missed-row .concept-bar {
+  margin: 0;
+}
+.support-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 12px;
+  align-items: center;
+  padding: 8px 0;
+  border-top: 1px solid rgba(53, 67, 61, 0.12);
+}
+.support-row span {
+  display: grid;
+}
+.support-row small {
+  color: rgba(53, 67, 61, 0.72);
+}
+.compare-table-panel {
+  padding: 8px 20px 14px;
+}
+.compare-row {
+  display: grid;
+  grid-template-columns: 1.2fr 0.9fr 0.8fr 1.6fr auto;
+  gap: 12px;
+  align-items: center;
+  min-height: 56px;
+  padding: 8px 4px;
+  font-size: 14px;
+  border-top: 1px solid rgba(53, 67, 61, 0.12);
+}
+.compare-row.roster-head {
+  min-height: 0;
+  border-top: 0;
+}
+.compare-row small {
+  font-weight: 400;
+  color: rgba(53, 67, 61, 0.72);
+}
+.other-class-panel {
+  display: grid;
+  gap: 14px;
+  justify-items: start;
+  padding: 20px;
+}
+@media (max-width: 900px) {
+  .compare-row {
+    grid-template-columns: 1fr 1fr;
+  }
+  .compare-row.roster-head {
+    display: none;
+  }
+  .missed-row {
+    grid-template-columns: 1fr auto;
+  }
+  .missed-row .concept-bar {
+    grid-column: 1 / -1;
+    grid-row: 2;
+  }
+}
+
+/* ---------- Pop quiz follow-up ---------- */
+.monitor-summary {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 12px;
+  padding: 0 19px;
+}
+.monitor-summary > div {
+  display: grid;
+  gap: 2px;
+  padding: 12px 14px;
+  background: #f6f5ef;
+  border: 1px solid rgba(53, 67, 61, 0.15);
+  border-radius: 8px;
+}
+.monitor-summary strong {
+  font-size: 20px;
+}
+.monitor-summary span {
+  font-size: 13px;
+  color: rgba(53, 67, 61, 0.78);
+}
+.quiz-monitor > .panel-note {
+  padding: 10px 19px 0;
+}
+.monitor-table {
+  padding: 0 19px 6px;
+}
+.monitor-row {
+  display: grid;
+  grid-template-columns: minmax(150px, 1fr) minmax(170px, 1.2fr) minmax(140px, 0.9fr) minmax(170px, 1fr);
+  gap: 12px;
+  align-items: center;
+  min-height: 64px;
+  padding: 8px 0;
+  font-size: 14px;
+  border-top: 1px solid rgba(53, 67, 61, 0.12);
+}
+.monitor-row.roster-head {
+  min-height: 0;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: rgba(53, 67, 61, 0.7);
+  border-top: 0;
+}
+.ba-cell {
+  display: grid;
+  gap: 2px;
+}
+.ba-cell small {
+  font-size: 12px;
+  color: rgba(53, 67, 61, 0.78);
+}
+.before-after .ba-track {
+  stroke: rgba(53, 67, 61, 0.15);
+  stroke-width: 2;
+}
+.before-after .ba-change {
+  stroke: #78958a;
+  stroke-width: 3;
+}
+.before-after .ba-before {
+  fill: #fff;
+  stroke: #8d9792;
+  stroke-width: 2;
+}
+.before-after .ba-after {
+  fill: var(--ink);
+}
+.monitor-action {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+@media (max-width: 900px) {
+  .monitor-row {
+    grid-template-columns: 1fr 1fr;
+  }
+  .monitor-row.roster-head {
+    display: none;
+  }
+}
+
+/* ---------- Bulk exam upload ---------- */
+.bulk-upload {
+  display: grid;
+  gap: 12px;
+  margin: 4px 4px 14px;
+}
+.drop-zone {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 14px;
+  align-items: center;
+  padding: 16px;
+  background: #fbfaf6;
+  border: 2px dashed rgba(53, 67, 61, 0.35);
+  border-radius: 10px;
+}
+.drop-zone.dragging {
+  background: #eef4ef;
+  border-color: var(--ink);
+}
+.drop-zone > div:nth-child(2) {
+  display: grid;
+  gap: 2px;
+}
+.drop-zone small {
+  font-size: 13px;
+  color: rgba(53, 67, 61, 0.75);
+}
+.drop-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.upload-match {
+  display: grid;
+  gap: 8px;
+  padding: 14px;
+  background: #fff;
+  border: 1px solid rgba(53, 67, 61, 0.22);
+  border-radius: 10px;
+}
+.upload-match h3 {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  font-size: 16px;
+}
+.upload-row {
+  display: grid;
+  grid-template-columns: 48px minmax(0, 1.3fr) minmax(150px, 1fr) minmax(0, 1.3fr) auto;
+  gap: 12px;
+  align-items: center;
+  padding: 8px 0;
+  border-top: 1px solid rgba(53, 67, 61, 0.12);
+}
+.upload-row img,
+.upload-thumb {
+  width: 48px;
+  height: 64px;
+  object-fit: cover;
+  border: 1px solid rgba(53, 67, 61, 0.25);
+  border-radius: 4px;
+}
+.upload-thumb {
+  display: grid;
+  place-items: center;
+  font-size: 12px;
+  font-weight: 700;
+  background: #f3f2ec;
+}
+.upload-name {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.upload-name .status,
+.upload-status .status {
+  justify-self: start;
+  white-space: normal;
+}
+.upload-row select {
+  width: 100%;
+  min-height: 38px;
+  padding: 0 8px;
+  font: inherit;
+  border: 1px solid #9aa9a1;
+  border-radius: 6px;
+}
+.upload-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+@media (max-width: 760px) {
+  .drop-zone {
+    grid-template-columns: auto 1fr;
+  }
+  .drop-actions {
+    grid-column: 1 / -1;
+  }
+  .upload-row {
+    grid-template-columns: 48px 1fr auto;
+  }
+  .upload-row > label,
+  .upload-status {
+    grid-column: 2 / -1;
+  }
+}
+
+/* ---------- Questions in a new assessment ---------- */
+.question-editor {
+  grid-column: 1 / -1;
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid rgba(53, 67, 61, 0.2);
+  border-radius: 8px;
+}
+.question-editor legend {
+  padding: 0 4px;
+  font-size: 13px;
+  font-weight: 700;
+}
+.question-head,
+.question-row {
+  display: grid;
+  grid-template-columns: 36px minmax(0, 1.6fr) minmax(0, 1fr) 72px minmax(0, 1.4fr) 36px;
+  gap: 8px;
+  align-items: center;
+}
+.question-head {
+  font-size: 12px;
+  font-weight: 700;
+  color: rgba(53, 67, 61, 0.7);
+}
+.question-row input {
+  width: 100%;
+  min-width: 0;
+  min-height: 38px;
+  padding: 0 10px;
+  font: inherit;
+  color: var(--ink);
+  background: #fff;
+  border: 1px solid #9aa9a1;
+  border-radius: 6px;
+}
+.question-n {
+  font-weight: 700;
+  font-size: 14px;
+}
+.question-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.marks-total {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  min-height: 38px;
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--ink);
+}
+.marks-total small {
+  font-size: 13px;
+  font-weight: 400;
+  color: rgba(53, 67, 61, 0.72);
+}
+.form-error {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 10px;
+  font-size: 14px;
+  color: #7a3b12;
+  background: #fbe6d6;
+  border: 1px solid #d99a6c;
+  border-radius: 6px;
+}
+.questions-toggle {
+  font-size: 13px;
+}
+.assessment-questions {
+  display: grid;
+  gap: 6px;
+  margin: 0 0 8px;
+  padding: 10px 14px 10px 36px;
+  font-size: 14px;
+  list-style: decimal;
+  background: #fbfaf6;
+  border-top: 1px solid rgba(53, 67, 61, 0.12);
+}
+.assessment-questions li span {
+  display: inline-block;
+  margin-left: 10px;
+  color: rgba(53, 67, 61, 0.75);
+}
+@media (max-width: 760px) {
+  .question-head {
+    display: none;
+  }
+  .question-row {
+    grid-template-columns: 36px 1fr 1fr 36px;
+  }
+  .question-row input:nth-of-type(1) {
+    grid-column: 2 / 4;
+  }
+  .question-row input:nth-of-type(4) {
+    grid-column: 2 / 4;
+  }
+}
+/* Checkboxes inside the assessment form keep their normal size (inputs there stretch to the column). */
+.assessment-form input[type="checkbox"] {
+  width: 18px;
+  min-height: 0;
+  height: 18px;
+  padding: 0;
+  flex: 0 0 auto;
+  margin-top: 2px;
+}
+.assessment-form label.share-toggle {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+.assessment-form label.share-toggle > span {
+  display: grid;
+  gap: 2px;
+}
+
+/* ---------- Nielsen heuristics: help tips, errors, grading progress, confirm, context ---------- */
+.help-tip {
+  position: relative;
+  display: inline-flex;
+  vertical-align: middle;
+}
+.help-tip-button {
+  display: inline-grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  min-height: 0;
+  padding: 0;
+  font: 700 13px/1 "Source Sans 3", sans-serif;
+  letter-spacing: 0;
+  color: var(--ink);
+  background: #fff;
+  border: 1.5px solid rgba(53, 67, 61, 0.55);
+  border-radius: 50%;
+  cursor: help;
+}
+.help-tip-button:focus-visible {
+  outline: 3px solid #6d4aff;
+  outline-offset: 2px;
+}
+.help-tip-bubble {
+  position: absolute;
+  z-index: 30;
+  top: calc(100% + 8px);
+  left: 50%;
+  transform: translateX(-50%);
+  display: grid;
+  gap: 4px;
+  width: min(300px, 80vw);
+  padding: 10px 12px;
+  font: 400 14px/1.45 "Source Sans 3", sans-serif;
+  letter-spacing: 0;
+  text-transform: none;
+  text-align: left;
+  color: var(--ink);
+  background: #fff;
+  border: 1px solid var(--ink);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(53, 67, 61, 0.18);
+}
+.help-tip-bubble strong {
+  font-size: 14px;
+}
+.share-help {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 6px 0 12px;
+  font-size: 13px;
+}
+.error-note {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 10px;
+  margin: 10px 0;
+  padding: 10px 12px;
+  font-size: 14px;
+  line-height: 1.4;
+  color: #6e3410;
+  background: #fbe6d6;
+  border: 1.5px solid #c9773f;
+  border-radius: 8px;
+}
+.error-note > svg {
+  flex: 0 0 auto;
+}
+.error-note > span {
+  flex: 1 1 220px;
+}
+.student-main .error-note {
+  font-size: 15px;
+  border-width: 2px;
+}
+.grading-loader {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 16px;
+  align-items: center;
+  min-height: 220px;
+  padding: 24px;
+}
+.grading-loader > div {
+  display: grid;
+  gap: 6px;
+}
+.grading-loader small {
+  font-size: 14px;
+  color: rgba(53, 67, 61, 0.75);
+}
+.grading-spinner {
+  width: 34px;
+  height: 34px;
+  border: 4px solid rgba(53, 67, 61, 0.15);
+  border-top-color: #78958a;
+  border-radius: 50%;
+  animation: grading-spin 0.9s linear infinite;
+}
+@keyframes grading-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .grading-spinner {
+    animation: none;
+  }
+}
+.grading-progress {
+  height: 8px;
+  overflow: hidden;
+  background: rgba(53, 67, 61, 0.12);
+  border-radius: 4px;
+}
+.grading-progress i {
+  display: block;
+  height: 100%;
+  background: #78958a;
+  transition: width 0.06s linear;
+}
+.confirm-facts {
+  display: grid;
+  gap: 6px;
+  margin: 12px 0;
+}
+.confirm-facts > div {
+  display: grid;
+  grid-template-columns: 150px 1fr;
+  gap: 10px;
+  padding: 8px 10px;
+  background: #f6f5ef;
+  border-radius: 6px;
+}
+.confirm-facts dt {
+  font-weight: 700;
+}
+.review-context {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 18px;
+  margin: 0 0 12px;
+  padding: 10px 14px;
+  font-size: 14px;
+  background: #fff;
+  border: 1px solid rgba(53, 67, 61, 0.2);
+  border-radius: 8px;
+}
+.review-context span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.activity-row.undone .activity-detail,
+.activity-row.undone .activity-kind {
+  text-decoration: line-through;
+  opacity: 0.7;
+}
+.undone-tag {
+  display: inline-block;
+  text-decoration: none;
+  font-weight: 700;
+}
+.back-button svg,
+.ocr-prev svg {
+  transform: rotate(180deg);
+}
+.breakdown-total {
+  margin: 4px 0 8px;
+  font-weight: 700;
+}

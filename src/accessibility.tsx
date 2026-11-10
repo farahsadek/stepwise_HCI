@@ -6,7 +6,7 @@ type TextSize = "md" | "lg" | "xl";
 const SIZE_KEY = "stepwise-text-size";
 const CONTRAST_KEY = "stepwise-contrast";
 export const READ_ALOUD_EVENT = "stepwise-read-aloud";
-/** Ask the student toolbar to read the current screen (or the open dialog) aloud. */
+/** Ask the read-aloud control to read the current screen (or the open dialog) aloud. */
 export const requestReadAloud = () => window.dispatchEvent(new Event(READ_ALOUD_EVENT));
 
 function readPref<T extends string>(key: string, allowed: T[], fallback: T): T {
@@ -26,32 +26,11 @@ function savePref(key: string, value: string) {
   }
 }
 
-/**
- * Student accessibility toolbar: read aloud for whatever screen is showing,
- * three text sizes and a high-contrast mode. Preferences are remembered.
- */
-export function AccessibilityToolbar({
-  language,
-  targetSelector,
-  screenKey,
-}: {
-  language: Lang;
-  targetSelector: string;
-  screenKey: string;
-}) {
-  const t = (en: string, de: string) => (language === "DE" ? de : en);
-  const [size, setSize] = useState<TextSize>(() => readPref<TextSize>(SIZE_KEY, ["md", "lg", "xl"], "md"));
-  const [contrast, setContrast] = useState(() => readPref(CONTRAST_KEY, ["normal", "high"], "normal") === "high");
+/** Reads the current screen (or an open dialog) aloud block by block, highlighting each block. */
+function useReadAloud(language: Lang, targetSelector: string, screenKey: string) {
   const [reading, setReading] = useState(false);
   const runId = useRef(0);
   const highlighted = useRef<Element | null>(null);
-
-  useEffect(() => {
-    document.documentElement.dataset.textSize = size;
-    document.documentElement.dataset.contrast = contrast ? "high" : "normal";
-    savePref(SIZE_KEY, size);
-    savePref(CONTRAST_KEY, contrast ? "high" : "normal");
-  }, [size, contrast]);
 
   const clearHighlight = () => {
     highlighted.current?.classList.remove("reading-now");
@@ -69,22 +48,15 @@ export function AccessibilityToolbar({
     setReading(false);
   };
 
-  // Leaving the student view (or changing screen) stops the reading and restores the page.
+  // Leaving the view (or changing screen) stops the reading and restores the page.
   useEffect(() => {
     stop();
   }, [screenKey, language]);
-  useEffect(
-    () => () => {
-      stop();
-      delete document.documentElement.dataset.textSize;
-      delete document.documentElement.dataset.contrast;
-    },
-    [],
-  );
+  useEffect(() => () => stop(), []);
 
   const start = () => {
     // An open dialog is read instead of the page behind it.
-    const root = document.querySelector(".student-shell .modal") ?? document.querySelector(targetSelector);
+    const root = document.querySelector(".modal, .drawer") ?? document.querySelector(targetSelector);
     if (!root) return;
     const candidates = Array.from(
       root.querySelectorAll<HTMLElement>(
@@ -143,7 +115,7 @@ export function AccessibilityToolbar({
     speakBlock(0);
   };
 
-  // Other student controls (e.g. a dialog's own read-aloud button) can ask the toolbar to read.
+  // Other controls (e.g. a dialog's own read-aloud button) can ask the toolbar to read.
   const startRef = useRef(start);
   startRef.current = start;
   useEffect(() => {
@@ -154,6 +126,43 @@ export function AccessibilityToolbar({
     window.addEventListener(READ_ALOUD_EVENT, onRequest);
     return () => window.removeEventListener(READ_ALOUD_EVENT, onRequest);
   }, []);
+
+  return { reading, start, stop };
+}
+
+/**
+ * Student accessibility toolbar: read aloud for whatever screen is showing,
+ * three text sizes and a high-contrast mode. Preferences are remembered.
+ */
+export function AccessibilityToolbar({
+  language,
+  targetSelector,
+  screenKey,
+}: {
+  language: Lang;
+  targetSelector: string;
+  screenKey: string;
+}) {
+  const t = (en: string, de: string) => (language === "DE" ? de : en);
+  const [size, setSize] = useState<TextSize>(() => readPref<TextSize>(SIZE_KEY, ["md", "lg", "xl"], "md"));
+  const [contrast, setContrast] = useState(() => readPref(CONTRAST_KEY, ["normal", "high"], "normal") === "high");
+  const { reading, start, stop } = useReadAloud(language, targetSelector, screenKey);
+
+  useEffect(() => {
+    document.documentElement.dataset.textSize = size;
+    document.documentElement.dataset.contrast = contrast ? "high" : "normal";
+    savePref(SIZE_KEY, size);
+    savePref(CONTRAST_KEY, contrast ? "high" : "normal");
+  }, [size, contrast]);
+
+  // Text size and contrast only apply to the student view; remove them when it closes.
+  useEffect(
+    () => () => {
+      delete document.documentElement.dataset.textSize;
+      delete document.documentElement.dataset.contrast;
+    },
+    [],
+  );
 
   const sizes: { id: TextSize; label: string; name: string }[] = [
     { id: "md", label: "A", name: t("Normal text", "Normaler Text") },
@@ -197,5 +206,31 @@ export function AccessibilityToolbar({
         {t("High contrast", "Hoher Kontrast")}
       </button>
     </div>
+  );
+}
+/** Teacher and parent: a compact "Read aloud" button for the top bar (same reader as the student view). */
+export function ReadAloudButton({
+  language,
+  targetSelector,
+  screenKey,
+}: {
+  language: Lang;
+  targetSelector: string;
+  screenKey: string;
+}) {
+  const t = (en: string, de: string) => (language === "DE" ? de : en);
+  const { reading, start, stop } = useReadAloud(language, targetSelector, screenKey);
+  return (
+    <button
+      type="button"
+      className={`read-aloud-button ${reading ? "active" : ""}`}
+      onClick={reading ? stop : start}
+      aria-pressed={reading}
+    >
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        <path d="M4 10v4h4l5 4V6l-5 4zM16 9c1.5 1.7 1.5 4.3 0 6M19 6c3 3.4 3 8.6 0 12" />
+      </svg>
+      <span>{reading ? t("Stop reading", "Vorlesen stoppen") : t("Read aloud", "Vorlesen")}</span>
+    </button>
   );
 }

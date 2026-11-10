@@ -8,7 +8,7 @@ import {
   type ReactNode,
 } from "react";
 import { ActivityHistoryPage, RecentActivity, RoleActivity, logActivity } from "./activity";
-import { AccessibilityToolbar, requestReadAloud } from "./accessibility";
+import { AccessibilityToolbar, ReadAloudButton, requestReadAloud } from "./accessibility";
 import { Button, Icon, Status, type IconName } from "./ui";
 import { khadijaConcepts, newId, questions, updateClassState, useClassState } from "./store";
 import {
@@ -46,6 +46,7 @@ import {
   type ParentTab,
 } from "./parent";
 import { CameraCapture, ExplainerVideo, analyzePage, type PageQuality } from "./student-media";
+import { LineChart, conceptColors, conceptShape } from "./charts";
 
 type Role = "student" | "teacher" | "parent";
 type StudentView =
@@ -259,6 +260,7 @@ const germanCopy: Record<string, string> = {
   "Mark awarded": "Vergebene Punkte",
   Cancel: "Abbrechen",
   "Save override": "Änderung speichern",
+  "Read aloud": "Vorlesen",
   "EXAM CONTEXT": "KONTEXT DER ARBEIT",
   "Current score": "Aktuelle Punktzahl",
   "Not graded": "Nicht bewertet",
@@ -271,7 +273,7 @@ const germanCopy: Record<string, string> = {
     "Prüfen Sie Scan und KI-Erklärung, bevor Sie eine Bewertung bestätigen.",
   "View class insights": "Klassenanalyse ansehen",
   "The flagged answer is saved as": "Die markierte Antwort wurde gespeichert als",
-  "Strong multiplication. Practise comparing fractions with visual models.":
+  "Strong multiplication. Practice comparing fractions with visual models.":
     "Sichere Multiplikation. Übe den Bruchvergleich mit visuellen Modellen.",
   "Show each step so your reasoning is clear.":
     "Zeige jeden Schritt, damit dein Rechenweg verständlich ist.",
@@ -295,7 +297,7 @@ const germanCopy: Record<string, string> = {
   "What’s going well": "Das klappt gut",
   "Khadija is doing well with multiplication facts and uses clear number strategies.":
     "Khadija beherrscht das Einmaleins gut und nutzt klare Rechenstrategien.",
-  "What to practise next": "Das sollte sie als Nächstes üben",
+  "What to practice next": "Das sollte sie als Nächstes üben",
   "Use simple drawings to compare halves, thirds and quarters.":
     "Nutzen Sie einfache Zeichnungen, um Hälften, Drittel und Viertel zu vergleichen.",
   "PUBLISHED QUIZZES": "VERÖFFENTLICHTE QUIZZE",
@@ -594,6 +596,7 @@ function TopBar({
   unreadCount,
   onNotifications,
   onProfile,
+  readAloud,
 }: {
   role: Role;
   language: "EN" | "DE";
@@ -602,6 +605,8 @@ function TopBar({
   unreadCount: number;
   onNotifications: () => void;
   onProfile?: () => void;
+  /** Teacher/parent: the page area the "Read aloud" button reads, and a key that changes per screen. */
+  readAloud?: { target: string; screenKey: string };
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const user =
@@ -631,6 +636,9 @@ function TopBar({
             DE
           </button>
         </div>
+        {readAloud && (
+          <ReadAloudButton language={language} targetSelector={readAloud.target} screenKey={readAloud.screenKey} />
+        )}
         <button
           className="notification-bell"
           onClick={onNotifications}
@@ -1052,6 +1060,14 @@ function AssessmentTracker({ stage, de }: { stage: number; de: boolean }) {
   );
 }
 
+/** Pie for a fraction "a/b": a of b equal slices filled, with slice lines. */
+function pieStyle(fraction: string, color: string) {
+  const [top, bottom] = fraction.split("/").map(Number);
+  return {
+    background: `repeating-conic-gradient(#35433d 0deg 1.5deg, transparent 1.5deg ${360 / bottom}deg), conic-gradient(${color} 0 ${(top / bottom) * 100}%, #eeeaf5 0)`,
+  };
+}
+
 function StudentApp({
   awardedMark,
   studentAnswer,
@@ -1109,7 +1125,8 @@ function StudentApp({
   // Demo script: the first sample photo is blurry, every later one is clear.
   const samplePhotos = useRef(0);
   const [practicePhase, setPracticePhase] = useState<PracticePhase>("lesson");
-  const [firstTry, setFirstTry] = useState<boolean[]>([]);
+  const [quizAnswers, setQuizAnswers] = useState<number[]>([]);
+  const [quizRound, setQuizRound] = useState(0);
   const [helpRequest, setHelpRequest] = useState<HelpRequest | null>(null);
   const [helpReason, setHelpReason] = useState<"reading" | "mark">("reading");
   const [helpMessage, setHelpMessage] = useState("");
@@ -1289,33 +1306,131 @@ function StudentApp({
     setPracticePhase("lesson");
     setPracticeStep(0);
     setPracticeAnswer(null);
-    setFirstTry([]);
+    setQuizAnswers([]);
     setView("practice");
   };
-  const practiceQuestions = [
-    {
-      title: t("Which fraction is bigger?", "Welcher Bruch ist größer?"),
-      options: ["2/3", "3/5"],
-      correct: 0,
-      help: t("Two thirds covers more of the whole.", "Zwei Drittel bedecken mehr vom Ganzen."),
-    },
-    {
-      title: t("Which fraction is smaller?", "Welcher Bruch ist kleiner?"),
-      options: ["1/4", "1/2"],
-      correct: 0,
-      help: t("One quarter is smaller than one half.", "Ein Viertel ist kleiner als eine Hälfte."),
-    },
-    {
-      title: t("Which fractions are equal?", "Welche Brüche sind gleich groß?"),
-      options: [t("2/4 and 1/2", "2/4 und 1/2"), t("2/4 and 2/3", "2/4 und 2/3")],
-      correct: 0,
-      help: t(
-        "Two quarters is the same as one half.",
-        "Zwei Viertel sind gleich groß wie eine Hälfte.",
-      ),
-    },
+  // Two sets so that "try new questions" is not a repeat of the same answers.
+  type QuizOption = { label: string; fractions: string[] };
+  type QuizQuestion = {
+    title: string;
+    options: QuizOption[];
+    correct: number;
+    why: string;
+    wrongNote: string;
+  };
+  const quizSets: QuizQuestion[][] = [
+    [
+      {
+        title: t("Which fraction is bigger?", "Welcher Bruch ist größer?"),
+        options: [
+          { label: "2/3", fractions: ["2/3"] },
+          { label: "3/5", fractions: ["3/5"] },
+        ],
+        correct: 0,
+        why: t(
+          "Make the bottom numbers the same: 2/3 = 10/15 and 3/5 = 9/15. 10 is more than 9, so 2/3 is bigger.",
+          "Mache die unteren Zahlen gleich: 2/3 = 10/15 und 3/5 = 9/15. 10 ist mehr als 9, also ist 2/3 größer.",
+        ),
+        wrongNote: t(
+          "3/5 has the bigger bottom number, but that only means its pieces are smaller.",
+          "3/5 hat die größere untere Zahl, aber das heißt nur, dass die Stücke kleiner sind.",
+        ),
+      },
+      {
+        title: t("Which fraction is smaller?", "Welcher Bruch ist kleiner?"),
+        options: [
+          { label: "1/4", fractions: ["1/4"] },
+          { label: "1/2", fractions: ["1/2"] },
+        ],
+        correct: 0,
+        why: t(
+          "Cut into 4 pieces, each piece is smaller than a half. So 1/4 is smaller than 1/2.",
+          "In 4 Stücke geteilt ist jedes Stück kleiner als eine Hälfte. Also ist 1/4 kleiner als 1/2.",
+        ),
+        wrongNote: t(
+          "1/2 has the smaller bottom number, but its pieces are bigger.",
+          "1/2 hat die kleinere untere Zahl, aber seine Stücke sind größer.",
+        ),
+      },
+      {
+        title: t("Which fractions are equal?", "Welche Brüche sind gleich groß?"),
+        options: [
+          { label: t("2/4 and 1/2", "2/4 und 1/2"), fractions: ["2/4", "1/2"] },
+          { label: t("2/4 and 2/3", "2/4 und 2/3"), fractions: ["2/4", "2/3"] },
+        ],
+        correct: 0,
+        why: t(
+          "Two quarters cover the same as one half: 2/4 = 1/2.",
+          "Zwei Viertel sind genauso viel wie eine Hälfte: 2/4 = 1/2.",
+        ),
+        wrongNote: t(
+          "2/4 is exactly half, but 2/3 is more than half.",
+          "2/4 ist genau die Hälfte, aber 2/3 ist mehr als die Hälfte.",
+        ),
+      },
+    ],
+    [
+      {
+        title: t("Which fraction is bigger?", "Welcher Bruch ist größer?"),
+        options: [
+          { label: "2/3", fractions: ["2/3"] },
+          { label: "3/4", fractions: ["3/4"] },
+        ],
+        correct: 1,
+        why: t(
+          "Make the bottom numbers the same: 3/4 = 9/12 and 2/3 = 8/12. 9 is more than 8, so 3/4 is bigger.",
+          "Mache die unteren Zahlen gleich: 3/4 = 9/12 und 2/3 = 8/12. 9 ist mehr als 8, also ist 3/4 größer.",
+        ),
+        wrongNote: t(
+          "They look close! Making the bottom numbers the same shows the difference.",
+          "Sie sehen ähnlich aus! Gleiche untere Zahlen zeigen den Unterschied.",
+        ),
+      },
+      {
+        title: t("Which fraction is smaller?", "Welcher Bruch ist kleiner?"),
+        options: [
+          { label: "2/5", fractions: ["2/5"] },
+          { label: "2/3", fractions: ["2/3"] },
+        ],
+        correct: 0,
+        why: t(
+          "Both have 2 pieces, but fifths are smaller than thirds. So 2/5 is smaller.",
+          "Beide haben 2 Stücke, aber Fünftel sind kleiner als Drittel. Also ist 2/5 kleiner.",
+        ),
+        wrongNote: t(
+          "When the top numbers are the same, the bigger bottom number means smaller pieces.",
+          "Wenn die oberen Zahlen gleich sind, bedeutet die größere untere Zahl kleinere Stücke.",
+        ),
+      },
+      {
+        title: t("Which fractions are equal?", "Welche Brüche sind gleich groß?"),
+        options: [
+          { label: t("3/6 and 1/3", "3/6 und 1/3"), fractions: ["3/6", "1/3"] },
+          { label: t("3/6 and 1/2", "3/6 und 1/2"), fractions: ["3/6", "1/2"] },
+        ],
+        correct: 1,
+        why: t(
+          "3/6 is half of the whole, the same as 1/2.",
+          "3/6 ist die Hälfte vom Ganzen, genauso viel wie 1/2.",
+        ),
+        wrongNote: t(
+          "3/6 is half, but 1/3 is less than half.",
+          "3/6 ist die Hälfte, aber 1/3 ist weniger als die Hälfte.",
+        ),
+      },
+    ],
   ];
+  const practiceQuestions = quizSets[quizRound % quizSets.length];
   const currentPractice = practiceQuestions[practiceStep];
+  const quizScore = quizAnswers.filter((answer, i) => answer === practiceQuestions[i]?.correct).length;
+  const startQuiz = (round: number) => {
+    setQuizRound(round);
+    setPracticePhase("quiz");
+    setPracticeStep(0);
+    setPracticeAnswer(null);
+    setQuizAnswers([]);
+    setView("practice");
+  };
   useEffect(() => {
     if (navigationRequest?.role !== "student") return;
     if (navigationRequest.target === "feedback") setView("feedback");
@@ -1555,7 +1670,7 @@ function StudentApp({
                         : q.state === "good"
                           ? t("Correct", "Richtig")
                           : q.state === "warn"
-                            ? t("Keep practising", "Weiter üben")
+                            ? t("Keep practicing", "Weiter üben")
                             : t("Practice opportunity", "Übungsmöglichkeit");
                     const mark = q.n === 2 ? `${awardedMark} / 3` : q.marks;
                     const answer =
@@ -1731,12 +1846,7 @@ function StudentApp({
               <div className="lesson-actions">
                 <Button
                   icon="play"
-                  onClick={() => {
-                    setPracticePhase("quiz");
-                    setPracticeStep(0);
-                    setPracticeAnswer(null);
-                    setFirstTry([]);
-                  }}
+                  onClick={() => startQuiz(quizRound)}
                 >
                   {t("Start the quiz", "Quiz starten")}
                 </Button>
@@ -1775,7 +1885,11 @@ function StudentApp({
                 <button className="back-link" onClick={() => setPracticePhase("lesson")}>
                   <Icon name="arrow" /> {t("Back to the lesson", "Zurück zur Lektion")}
                 </button>
-                <p className="kicker">{t("POP QUIZ", "KURZ-QUIZ")}</p>
+                <p className="kicker">
+                  {quizRound > 0
+                    ? t("POP QUIZ · NEW QUESTIONS", "KURZ-QUIZ · NEUE FRAGEN")
+                    : t("POP QUIZ", "KURZ-QUIZ")}
+                </p>
                 <h1>{currentPractice.title}</h1>
               </div>
               <div className="stepper">
@@ -1790,59 +1904,55 @@ function StudentApp({
             <article className="practice-card card">
               <div className="fraction-visuals">
                 {currentPractice.options.map((option, index) => (
-                  <div className="practice-option-wrap" key={option}>
+                  <div className="practice-option-wrap" key={option.label}>
                     <button
                       className={practiceAnswer === index ? "selected" : ""}
-                      onClick={() => {
-                        setPracticeAnswer(index);
-                        if (firstTry.length === practiceStep)
-                          setFirstTry([...firstTry, index === currentPractice.correct]);
-                      }}
+                      aria-pressed={practiceAnswer === index}
+                      onClick={() => setPracticeAnswer(index)}
                     >
-                      <span className={`pie ${index === 0 ? "pie-two" : "pie-three"}`} />
-                      <strong>{option}</strong>
+                      <span className="pie-row">
+                        {option.fractions.map((fraction, i) => (
+                          <span
+                            key={`${fraction}-${i}`}
+                            className={`pie ${option.fractions.length > 1 ? "pie-small" : ""}`}
+                            style={pieStyle(fraction, index === 0 ? "#6d4aff" : "#ffb68a")}
+                            aria-hidden="true"
+                          />
+                        ))}
+                      </span>
+                      <strong>{option.label}</strong>
                       <small>
-                        <Icon name="person" size={16} /> {t("Choose", "Wähle")} {option}
+                        <Icon name={practiceAnswer === index ? "check" : "person"} size={16} />{" "}
+                        {practiceAnswer === index ? t("Your choice", "Deine Wahl") : t("Choose", "Wähle")}
                       </small>
                     </button>
                     {index === 0 && <div className="or">{t("or", "oder")}</div>}
                   </div>
                 ))}
               </div>
-              {practiceAnswer !== null && (
-                <div
-                  className={`answer-note ${practiceAnswer === currentPractice.correct ? "correct" : "try"}`}
-                >
-                  <Icon name={practiceAnswer === currentPractice.correct ? "check" : "idea"} />
-                  <div>
-                    <strong>
-                      {practiceAnswer === currentPractice.correct
-                        ? t("That’s right!", "Richtig!")
-                        : t("Look once more.", "Schau noch einmal.")}
-                    </strong>
-                    <p>
-                      {practiceAnswer === currentPractice.correct
-                        ? currentPractice.help
-                        : t("Compare the shaded parts.", "Vergleiche die gefärbten Teile.")}
-                    </p>
-                  </div>
-                </div>
-              )}
+              <p className="quiz-hint">
+                {practiceAnswer === null
+                  ? t("Pick one answer. You will see the results at the end.", "Wähle eine Antwort. Die Ergebnisse siehst du am Ende.")
+                  : t("Answer saved. You can still change it.", "Antwort gespeichert. Du kannst sie noch ändern.")}
+              </p>
               <Button
                 icon={practiceStep === 2 ? "check" : "arrow"}
-                disabled={practiceAnswer !== currentPractice.correct}
+                disabled={practiceAnswer === null}
                 onClick={() => {
+                  if (practiceAnswer === null) return;
+                  const answers = [...quizAnswers.slice(0, practiceStep), practiceAnswer];
+                  setQuizAnswers(answers);
                   if (practiceStep < 2) {
                     setPracticeStep(practiceStep + 1);
                     setPracticeAnswer(null);
                     return;
                   }
-                  const right = firstTry.filter(Boolean).length;
+                  const right = answers.filter((answer, i) => answer === practiceQuestions[i].correct).length;
                   setPracticed(true);
                   setPracticeScore(right);
                   logActivity("practice", "Khadija", {
-                    EN: `Fraction lesson and pop quiz: ${right}/3 right the first time`,
-                    DE: `Bruch-Lektion und Kurz-Quiz: ${right}/3 beim ersten Versuch richtig`,
+                    EN: `Fraction pop quiz${quizRound > 0 ? " (new questions)" : ""}: ${right}/3 right`,
+                    DE: `Bruch-Kurz-Quiz${quizRound > 0 ? " (neue Fragen)" : ""}: ${right}/3 richtig`,
                   });
                   addNotification(
                     "teacher",
@@ -1851,8 +1961,8 @@ function StudentApp({
                       DE: "Khadija hat die Übung abgeschlossen",
                     },
                     {
-                      EN: `Khadija finished the fraction lesson and pop quiz: ${right} of 3 right the first time.`,
-                      DE: `Khadija hat die Bruch-Lektion und das Kurz-Quiz beendet: ${right} von 3 beim ersten Versuch richtig.`,
+                      EN: `Khadija finished the fraction pop quiz: ${right} of 3 right.${right < 3 ? " Stepwise recommended more practice." : ""}`,
+                      DE: `Khadija hat das Bruch-Kurz-Quiz beendet: ${right} von 3 richtig.${right < 3 ? " Stepwise hat weitere Übung empfohlen." : ""}`,
                     },
                     { EN: "View progress", DE: "Fortschritt ansehen" },
                     "insights",
@@ -1875,62 +1985,154 @@ function StudentApp({
                 <p className="kicker">{t("QUIZ RESULTS", "QUIZ-ERGEBNIS")}</p>
                 <h1>
                   {t(
-                    `You got ${practiceScore ?? 0} of 3 right the first time!`,
-                    `Du hattest ${practiceScore ?? 0} von 3 beim ersten Versuch richtig!`,
+                    `You got ${quizScore} of 3 right!`,
+                    `Du hattest ${quizScore} von 3 richtig!`,
                   )}
                 </h1>
               </div>
             </div>
             <div className="question-list practice-results">
-              {practiceQuestions.map((question, index) => (
-                <article className="question-row" key={question.title}>
-                  <div className={`q-number ${firstTry[index] ? "good" : "warn"}`}>
-                    <Icon name={firstTry[index] ? "check" : "idea"} />
-                  </div>
-                  <div>
-                    <h3>{question.title}</h3>
-                    <span>
-                      {firstTry[index]
-                        ? t("Right the first time.", "Gleich beim ersten Mal richtig.")
-                        : question.help}
-                    </span>
-                  </div>
-                  <div className="q-result">
-                    <Status type={firstTry[index] ? "good" : "warn"}>
-                      {firstTry[index]
-                        ? t("Correct", "Richtig")
-                        : t("Keep practising", "Weiter üben")}
-                    </Status>
-                  </div>
-                </article>
-              ))}
-            </div>
-            <div className="next-card">
-              <Icon name={practiceScore === 3 ? "star" : "idea"} size={30} />
-              <div>
-                <h3>
-                  {practiceScore === 3
-                    ? t("You understand comparing fractions!", "Du kannst Brüche vergleichen!")
-                    : t("Almost there!", "Fast geschafft!")}
-                </h3>
-                <p>
-                  {practiceScore === 3
-                    ? t("Ms. Ashraf can see your result.", "Frau Ashraf kann dein Ergebnis sehen.")
-                    : t(
-                        "Read the mini lesson once more, then try again. Ms. Ashraf can see your result.",
-                        "Lies die Mini-Lektion noch einmal und versuche es dann wieder. Frau Ashraf kann dein Ergebnis sehen.",
+              {practiceQuestions.map((question, index) => {
+                const chosen = quizAnswers[index];
+                const right = chosen === question.correct;
+                return (
+                  <article className="question-row" key={question.title + index}>
+                    <div className={`q-number ${right ? "good" : "warn"}`}>
+                      <Icon name={right ? "check" : "idea"} />
+                    </div>
+                    <div>
+                      <p>
+                        {t("Question", "Aufgabe")} {index + 1}
+                      </p>
+                      <h3>{question.title}</h3>
+                      <span>
+                        {t("Your answer", "Deine Antwort")}: {question.options[chosen]?.label ?? "—"}
+                      </span>
+                      {!right && (
+                        <>
+                          <span className="quiz-right-answer">
+                            {t("Right answer", "Richtige Antwort")}:{" "}
+                            <b>{question.options[question.correct].label}</b>
+                          </span>
+                          <p className="q-why">
+                            <Icon name="idea" size={18} />
+                            <span>
+                              <b>{t("Why?", "Warum?")}</b> {question.wrongNote} {question.why}
+                            </span>
+                          </p>
+                        </>
                       )}
+                    </div>
+                    <div className="q-result">
+                      <Status type={right ? "good" : "warn"}>
+                        {right ? t("Correct", "Richtig") : t("Not yet", "Noch nicht")}
+                      </Status>
+                    </div>
+                  </article>
+                );
+              })}
+            </div>
+            <article className={`card quiz-recommendation ${quizScore === 3 ? "done" : ""}`}>
+              <span className="focus-icon">
+                <Icon name={quizScore === 3 ? "star" : "idea"} size={27} />
+              </span>
+              <div>
+                <p className="kicker">
+                  {quizScore === 3
+                    ? t("NO EXTRA PRACTICE NEEDED", "KEINE EXTRA-ÜBUNG NÖTIG")
+                    : t("RECOMMENDED PRACTICE", "EMPFOHLENE ÜBUNG")}
                 </p>
+                <h2>
+                  {quizScore === 3
+                    ? t("You can compare fractions!", "Du kannst Brüche vergleichen!")
+                    : quizScore === 2
+                      ? t("One more short round will help", "Eine kurze Runde mehr hilft dir")
+                      : t("Watch the lesson again first", "Schau dir zuerst die Lektion noch einmal an")}
+                </h2>
+                {quizScore === 3 ? (
+                  <p>
+                    {t(
+                      "Great work! Ms. Ashraf can see your result.",
+                      "Super gemacht! Frau Ashraf kann dein Ergebnis sehen.",
+                    )}
+                  </p>
+                ) : (
+                  <ol>
+                    {quizScore <= 1 && (
+                      <li>
+                        {t(
+                          "Watch the 20-second video and read the 3 steps.",
+                          "Schau das 20-Sekunden-Video und lies die 3 Schritte.",
+                        )}
+                      </li>
+                    )}
+                    <li>
+                      {t(
+                        "Read the “Why?” boxes above.",
+                        "Lies die „Warum?“-Kästen oben.",
+                      )}
+                    </li>
+                    <li>
+                      {t(
+                        "Then try 3 new questions.",
+                        "Dann probiere 3 neue Fragen.",
+                      )}
+                    </li>
+                    {quizScore <= 1 && (
+                      <li>
+                        {t(
+                          "Ms. Ashraf can see your result and will help you in class.",
+                          "Frau Ashraf sieht dein Ergebnis und hilft dir im Unterricht.",
+                        )}
+                      </li>
+                    )}
+                  </ol>
+                )}
               </div>
               <div className="lesson-actions">
-                <Button icon="trend" onClick={() => setView("progress")}>
-                  {t("See my progress", "Meinen Fortschritt ansehen")}
-                </Button>
-                <Button icon="play" variant="secondary" onClick={startPractice}>
-                  {t("Try again", "Nochmal versuchen")}
-                </Button>
+                {quizScore === 3 ? (
+                  <Button icon="trend" onClick={() => setView("progress")}>
+                    {t("See my progress", "Meinen Fortschritt ansehen")}
+                  </Button>
+                ) : quizScore === 2 ? (
+                  <>
+                    <Button icon="play" onClick={() => startQuiz(quizRound + 1)}>
+                      {t("Try 3 new questions", "3 neue Fragen probieren")}
+                    </Button>
+                    <Button
+                      icon="book"
+                      variant="secondary"
+                      onClick={() => {
+                        setQuizRound(quizRound + 1);
+                        setPracticePhase("lesson");
+                      }}
+                    >
+                      {t("Watch the lesson again", "Lektion noch einmal ansehen")}
+                    </Button>
+                  </>
+                ) : (
+                  <>
+                    <Button
+                      icon="book"
+                      onClick={() => {
+                        setQuizRound(quizRound + 1);
+                        setPracticePhase("lesson");
+                      }}
+                    >
+                      {t("Watch the lesson again", "Lektion noch einmal ansehen")}
+                    </Button>
+                    <Button icon="message" variant="secondary" onClick={() => openHelp("ask", 7)}>
+                      {t("Ask Ms. Ashraf", "Frau Ashraf fragen")}
+                    </Button>
+                  </>
+                )}
+                {quizScore < 3 && (
+                  <Button icon="trend" variant="ghost" onClick={() => setView("progress")}>
+                    {t("Maybe later – see my progress", "Später – meinen Fortschritt ansehen")}
+                  </Button>
+                )}
               </div>
-            </div>
+            </article>
           </section>
         )}
 
@@ -2203,68 +2405,72 @@ function StudentApp({
               </div>
             </div>
             <article className="card progress-card progress-page-card">
+              <h2>{t("Maths quiz history", "Mathe-Quizverlauf")}</h2>
+              <StairChart
+                values={score === null ? [52, 58, 64] : [52, 58, 64, percent ?? 68]}
+                label={t("Progress staircase", "Fortschrittstreppe")}
+              />
+              <div className="chart-labels student-chart-labels">
+                <span>Quiz 1</span>
+                <span>Quiz 2</span>
+                <span>Quiz 3</span>
+                {score !== null && <span>Quiz 4</span>}
+              </div>
               {score === null ? (
                 <>
-                  <h2>{t("Quiz 4 is still being checked", "Quiz 4 wird noch geprüft")}</h2>
+                  <p className="progress-pending">
+                    <Icon name="clock" size={18} />{" "}
+                    {t(
+                      "Quiz 4 is still being checked. It will join your chart when Ms. Ashraf shares it.",
+                      "Quiz 4 wird noch geprüft. Es kommt in dein Diagramm, sobald Frau Ashraf es freigibt.",
+                    )}
+                  </p>
                   <AssessmentTracker stage={trackerStage} de={de} />
                 </>
               ) : (
-                <>
-                  <h2>{t("Maths quiz history", "Mathe-Quizverlauf")}</h2>
-                  <StairChart
-                    values={[52, 58, 64, percent ?? 68]}
-                    label={t("Progress staircase", "Fortschrittstreppe")}
-                  />
-                </>
+                <p className="progress-pending">
+                  <Icon name="trend" size={18} />{" "}
+                  {t(
+                    `Up ${(percent ?? 68) - 52} points since Quiz 1. Well done!`,
+                    `${(percent ?? 68) - 52} Punkte mehr seit Quiz 1. Gut gemacht!`,
+                  )}
+                </p>
               )}
-              {practiced && <Status type="good">{t("Practice done", "Übung geschafft")}</Status>}
+            </article>
+            <article className="card topic-growth-card">
+              <p className="kicker">{t("BY TOPIC", "NACH THEMA")}</p>
+              <h2>{t("How each skill is growing", "So wachsen deine Fähigkeiten")}</h2>
+              <LineChart
+                language={language}
+                title={t(
+                  "Your score in each topic, Quiz 2 to Quiz 4",
+                  "Deine Ergebnisse pro Thema, Quiz 2 bis Quiz 4",
+                )}
+                xLabels={["Quiz 2", "Quiz 3", "Quiz 4"]}
+                pendingNote={t("being checked", "wird geprüft")}
+                series={khadijaConcepts.map((concept, index) => ({
+                  name: concept.name[language],
+                  values: score === null ? [...concept.values.slice(0, 2), null] : concept.values,
+                  color: conceptColors[index],
+                  shape: conceptShape(index),
+                }))}
+              />
+              <div className="topic-status-row">
+                {khadijaConcepts.map((concept) => (
+                  <span key={concept.name.EN}>
+                    <strong>{concept.name[language]}</strong>
+                    <Status type={concept.level}>
+                      {concept.level === "good"
+                        ? t("Strong", "Stark")
+                        : concept.level === "neutral"
+                          ? t("Getting better", "Wird besser")
+                          : t("Needs more practice", "Braucht mehr Übung")}
+                    </Status>
+                  </span>
+                ))}
+              </div>
             </article>
             <section className="student-insights">
-              <article className="card">
-                <p className="kicker">{t("BY TOPIC", "NACH THEMA")}</p>
-                <h2>{t("How each skill is growing", "So wachsen deine Fähigkeiten")}</h2>
-                {[
-                  {
-                    name: t("Multiplication", "Multiplizieren"),
-                    values: khadijaConcepts[0].values,
-                    type: "good" as const,
-                    label: t("Strong", "Stark"),
-                  },
-                  {
-                    name: t("Word problems", "Sachaufgaben"),
-                    values: khadijaConcepts[1].values,
-                    type: "neutral" as const,
-                    label: t("Getting better", "Wird besser"),
-                  },
-                  {
-                    name: t("Comparing fractions", "Brüche vergleichen"),
-                    values: khadijaConcepts[2].values,
-                    type: "warn" as const,
-                    label: t("Needs more practice", "Braucht mehr Übung"),
-                  },
-                ].map((skill) => {
-                  const shown = score === null ? skill.values.slice(0, 2) : skill.values;
-                  return (
-                    <div className="skill-trend" key={skill.name}>
-                      <div className="learning-spot">
-                        <strong>{skill.name}</strong>
-                        <Status type={skill.type}>{skill.label}</Status>
-                      </div>
-                      <div className="skill-trend-bars">
-                        {shown.map((value, index) => (
-                          <span key={index}>
-                            <small>Quiz {index + 2}</small>
-                            <i>
-                              <b style={{ width: `${value}%` }} />
-                            </i>
-                            <small>{value}%</small>
-                          </span>
-                        ))}
-                      </div>
-                    </div>
-                  );
-                })}
-              </article>
               <article className="card">
                 <p className="kicker">{t("MY PRACTICE", "MEINE ÜBUNGEN")}</p>
                 <h2>{t("Practice list", "Übungsliste")}</h2>
@@ -2288,9 +2494,22 @@ function StudentApp({
                     </Status>
                   </div>
                 ))}
-                {!practiced && (
+                {practiced && practiceScore !== null && practiceScore < 3 && (
+                  <div className="learning-spot">
+                    <strong>
+                      {t(
+                        "Recommended: 3 new fraction questions",
+                        "Empfohlen: 3 neue Bruchaufgaben",
+                      )}
+                    </strong>
+                    <Status type="warn">{t("Waiting for you", "Wartet auf dich")}</Status>
+                  </div>
+                )}
+                {(!practiced || (practiceScore ?? 3) < 3) && (
                   <Button icon="play" variant="secondary" onClick={startPractice}>
-                    {t("Start practice", "Übung starten")}
+                    {practiced
+                      ? t("Practice again", "Nochmal üben")
+                      : t("Start practice", "Übung starten")}
                   </Button>
                 )}
               </article>
@@ -2927,6 +3146,7 @@ function TeacherApp({
             unreadCount={unreadCount}
             onNotifications={onNotifications}
             onProfile={() => setView("profile")}
+            readAloud={{ target: ".teacher-main", screenKey: view }}
           />
           <main className="teacher-main">
             {view === "overview" && (
@@ -3942,6 +4162,9 @@ function TeacherApp({
                 </select>
               </label>
               <div className="modal-actions">
+                <Button icon="speaker" variant="ghost" className="modal-read" onClick={requestReadAloud}>
+                  Read aloud
+                </Button>
                 <Button icon="close" variant="ghost" onClick={() => setModal(false)}>
                   Cancel
                 </Button>
@@ -3988,6 +4211,9 @@ function TeacherApp({
                 }}
               >
                 View class insights
+              </Button>
+              <Button icon="speaker" variant="ghost" onClick={requestReadAloud}>
+                Read aloud
               </Button>
             </aside>
           </>
@@ -4101,25 +4327,23 @@ function ParentApp({
           unreadCount={unreadCount}
           onNotifications={onNotifications}
           onProfile={() => setTab("profile")}
+          readAloud={{ target: ".parent-main", screenKey: `${child}-${tab}` }}
         />
         <main className="parent-main">
           <ChildSwitcher
             language={language}
             child={child}
-            setChild={(next) => {
-              setChild(next);
-              setTab("overview");
-            }}
+            setChild={setChild}
           />
-          {child === "Yara" ? (
-            <SiblingView language={language} />
-          ) : tab === "profile" ? (
+          {tab === "profile" ? (
             <ParentProfile
               language={language}
               setLanguage={setLanguage}
               notify={plainNotify}
               onBack={() => setTab("overview")}
             />
+          ) : child === "Yara" ? (
+            <SiblingView language={language} tab={tab} setTab={setTab} notify={plainNotify} />
           ) : (
             <>
               <section className="parent-hello">
@@ -4204,7 +4428,7 @@ function ParentApp({
                       <Icon name="idea" />
                     </span>
                     <div>
-                      <h2>What to practise next</h2>
+                      <h2>What to practice next</h2>
                       <p>Use simple drawings to compare halves, thirds and quarters.</p>
                     </div>
                   </article>
@@ -4391,7 +4615,7 @@ export default function App() {
   const [awardedMark, setAwardedMark] = useState<number | null>(null);
   const [studentAnswer, setStudentAnswer] = useState("528");
   const [teacherFeedback, setTeacherFeedback] = useState(
-    "Strong multiplication. Practise comparing fractions with visual models.",
+    "Strong multiplication. Practice comparing fractions with visual models.",
   );
   const [redFlagDecision, setRedFlagDecision] = useState<
     "confirmed" | "dismissed" | "postponed" | null

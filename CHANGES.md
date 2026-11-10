@@ -1,5 +1,54 @@
 # Changes
 
+## 2026-11-10 (5) — Read aloud for teacher and parent (A4)
+
+- Read aloud was only in the student toolbar. The reader is now a shared hook (`useReadAloud` in
+  `src/accessibility.tsx`); teacher and parent get a "Read aloud" / "Vorlesen" button in the top
+  bar (`ReadAloudButton`). It reads the current page block by block with the same highlight, in the
+  chosen language, and stops when the screen, tab or child changes.
+- Open dialogs cover the top bar, so the teacher's note dialog, override dialog and exam-context
+  drawer have their own "Read aloud" button (as the student's Ask/Report dialog already had); it
+  reads the dialog, not the page behind it.
+- Text size and high contrast stay student-only (student design decision).
+- Phones: the button becomes a 44px icon with a hidden label for screen readers; on the parent bar
+  ≤ 440px the "Stepwise" word is hidden (icon stays) so the bar does not scroll sideways.
+
+Tests: new `pw/e2e-readaloud.mjs` EN/DE 19/19; all other suites unchanged and passing.
+
+## 2026-11-10 (4) — D9 child switcher, teacher layout fixes, "practice" spelling
+
+- D9: switching to Yara now keeps the same header, tabs and current tab (Overview, Quiz results,
+  Progress, Help at home, Messages), filled with Yara's own data (3 quizzes, topic chart, no
+  alerts, empty home help, her own conversation with Ms. Hamed, kept while switching). Profile
+  opens from either child. Switching children no longer jumps back to Overview.
+- Teacher student record: quiz history is now a line chart with a 0–100 % axis (Quiz 4 shown as
+  "not confirmed" until confirmed); the learning-gap cards and the recurring-mistake text no longer
+  stick out of their card.
+- New assessment form: the native file input (which overflowed) is now a "Choose a file" button
+  that shows the chosen file name; fields fit at 1600/1280/1024/390 px. Assessment list columns
+  line up (status chips right-aligned).
+- Charts no longer widen their card on mobile (parent Progress tab scrolled sideways at 390 px).
+- Spelling: "practise" → "practice" everywhere in the UI.
+
+Tests: new `pw/e2e-fixes.mjs` EN/DE 12/12; D 39/39 & 42/42 (Yara tabs added); B12/13 25/25;
+C 34/34 & 35/35; A+B 22/22; tsc pass; no console errors.
+
+## 2026-11-10 (3) — B12 pop quiz feedback and B13 progress graphs reworked
+
+- B12: the pop quiz no longer reveals right/wrong during the quiz (answer saved, can change before
+  Next). The results screen shows each answer, the right answer and a "Why?" explanation for every
+  mistake, then a recommendation by score: 3/3 no extra practice; 2/3 one more round (3 new
+  questions, second question set) or the lesson again; 0–1 the lesson first, ask Ms. Ashraf, teacher
+  told. "Recommended: 3 new fraction questions" appears in the practice list until a 3/3.
+- Fixed: every quiz question showed the same 2/3 vs 3/5 pictures; pictures now match each option.
+- B13: new `src/charts.tsx` line chart (validated colour-blind-safe palette, marker shapes, legend,
+  end labels, hover/keyboard tooltip, table view). Student Progress shows the quiz-history chart
+  before publishing too (Quiz 1–3) and a per-topic line chart Quiz 2–4 (Quiz 4 after publishing).
+  The parent Progress tab uses the same chart.
+- Teacher/parent wording no longer says "first try". Numbered steps get their numbers back.
+
+Tests: `pw/e2e-B12-13.mjs` EN/DE 25/25; Part A+B 22/22, C 34/34 & 35/35, D 33/33 & 36/36.
+
 ## 2026-11-10 (2) — Part D (Parent view)
 
 New file: `src/parent.tsx` (parent sections, German via their own `t(en, de)`). Quiz 4 question

@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { logActivity } from "./activity";
+import { LineChart, conceptColors, conceptShape } from "./charts";
 import { ExplainerVideo } from "./student-media";
 import { messageText, messageTime } from "./teacher";
 import { Button, Icon, Status } from "./ui";
@@ -155,7 +156,7 @@ export function PracticeStatus({ language, quiz }: { language: Lang; quiz: Paren
       ) : quiz.practiced ? (
         <>
           <Status type={quiz.practiceScore === 3 ? "good" : "neutral"}>
-            {t("Done", "Erledigt")} · {quiz.practiceScore} {t("of 3 right the first time", "von 3 beim ersten Versuch richtig")}
+            {t("Done", "Erledigt")} · {quiz.practiceScore} {t("of 3 right in the pop quiz", "von 3 im Kurz-Quiz richtig")}
           </Status>
           <p>
             {quiz.practiceScore === 3
@@ -340,29 +341,30 @@ export function ParentConcepts({ language, quiz }: { language: Lang; quiz: Paren
   const t = makeT(language);
   const labels = { good: t("Strong", "Stark"), neutral: t("Getting better", "Wird besser"), warn: t("Needs practice", "Braucht Übung") };
   return (
-    <article className="card parent-concepts">
+    <article className="card parent-concepts parent-wide">
       <p className="kicker">{t("BY TOPIC", "NACH THEMA")}</p>
       <h2>{t("How each topic is going", "So entwickeln sich die Themen")}</h2>
-      {khadijaConcepts.map((concept) => {
-        const values = quiz.visible ? concept.values : concept.values.slice(0, 2);
-        return (
-          <div className="parent-concept" key={concept.name.EN}>
-            <div>
-              <strong>{concept.name[language]}</strong>
-              <Status type={concept.level}>{labels[concept.level]}</Status>
-            </div>
-            {values.map((value, index) => (
-              <span key={index}>
-                <small>Quiz {index + 2}</small>
-                <i>
-                  <b style={{ width: `${value}%` }} />
-                </i>
-                <small>{value}%</small>
-              </span>
-            ))}
-          </div>
-        );
-      })}
+      <LineChart
+        language={language}
+        fontSize={13}
+        title={t("Khadija’s score in each topic, Quiz 2 to Quiz 4", "Khadijas Ergebnisse pro Thema, Quiz 2 bis Quiz 4")}
+        xLabels={["Quiz 2", "Quiz 3", "Quiz 4"]}
+        pendingNote={t("not shared yet", "noch nicht geteilt")}
+        series={khadijaConcepts.map((concept, index) => ({
+          name: concept.name[language],
+          values: quiz.visible ? concept.values : [...concept.values.slice(0, 2), null],
+          color: conceptColors[index],
+          shape: conceptShape(index),
+        }))}
+      />
+      <div className="topic-status-row">
+        {khadijaConcepts.map((concept) => (
+          <span key={concept.name.EN}>
+            <strong>{concept.name[language]}</strong>
+            <Status type={concept.level}>{labels[concept.level]}</Status>
+          </span>
+        ))}
+      </div>
     </article>
   );
 }
@@ -574,12 +576,40 @@ export function ParentProfile({
   );
 }
 
+
 // ---------------------------------------------------------------------------
-// D9 – second linked child (no Quiz 4 story; shows the same structure)
+// D9 – second linked child: same tabs and layout as Khadija, Yara's own data
 // ---------------------------------------------------------------------------
-export function SiblingView({ language }: { language: Lang }) {
+const yaraQuizzes = [
+  { n: 1, en: "Numbers to 100", de: "Zahlen bis 100", date: { EN: "10 September", DE: "10. September" }, score: 14, of: 20 },
+  { n: 2, en: "Addition", de: "Addition", date: { EN: "24 September", DE: "24. September" }, score: 19, of: 25 },
+  { n: 3, en: "Addition and subtraction", de: "Addition und Subtraktion", date: { EN: "8 October", DE: "8. Oktober" }, score: 41, of: 50 },
+];
+/** Kept outside the component so messages survive switching between children. */
+let yaraMessages: { text: string; at: number }[] = [];
+const yaraTopics = [
+  { en: "Adding", de: "Addieren", values: [72, 80, 88], level: "good" as const },
+  { en: "Subtracting", de: "Subtrahieren", values: [64, 70, 78], level: "good" as const },
+  { en: "Telling the time", de: "Uhrzeit lesen", values: [50, 55, 60], level: "neutral" as const },
+];
+
+export function SiblingView({
+  language,
+  tab,
+  setTab,
+  notify,
+}: {
+  language: Lang;
+  tab: ParentTab;
+  setTab: (tab: ParentTab) => void;
+  notify: (m: string) => void;
+}) {
   const t = makeT(language);
-  const history = [70, 76, 82];
+  const [messages, setMessages] = useState(yaraMessages);
+  const [text, setText] = useState("");
+  const percents = yaraQuizzes.map((q) => Math.round((q.score / q.of) * 100));
+  const labels = { good: t("Strong", "Stark"), neutral: t("Getting better", "Wird besser"), warn: t("Needs practice", "Braucht Übung") };
+  const latest = yaraQuizzes[yaraQuizzes.length - 1];
   return (
     <>
       <section className="parent-hello">
@@ -590,59 +620,179 @@ export function SiblingView({ language }: { language: Lang }) {
           <p>{t("Grade 2A · Ms. Dina Hamed", "Klasse 2A · Frau Dina Hamed")}</p>
         </div>
       </section>
-      <article className="parent-score card previous-score">
-        <div>
-          <Status type="good">{t("Published", "Veröffentlicht")}</Status>
-          <p className="kicker">{t("QUIZ 3 · MATHEMATICS", "QUIZ 3 · MATHEMATIK")}</p>
-          <h2>{t("Addition and subtraction", "Addition und Subtraktion")}</h2>
-          <p>{t("8 October", "8. Oktober")}</p>
-        </div>
-        <strong>
-          82<small>%</small>
-        </strong>
-      </article>
-      <article className="card parent-alert calm">
-        <span className="parent-alert-icon">
-          <Icon name="check" />
-        </span>
-        <div>
-          <Status type="good">{t("No learning alerts", "Keine Lernhinweise")}</Status>
-          <p>{t("Ms. Hamed has not raised any concern.", "Frau Hamed hat keine Sorge gemeldet.")}</p>
-        </div>
-      </article>
-      <article className="parent-message card">
-        <span>
-          <Icon name="check" />
-        </span>
-        <div>
-          <h2>{t("What’s going well", "Das klappt gut")}</h2>
-          <p>{t("Yara adds two-digit numbers confidently.", "Yara addiert zweistellige Zahlen sicher.")}</p>
-        </div>
-      </article>
-      <article className="parent-message peach card">
-        <span>
-          <Icon name="idea" />
-        </span>
-        <div>
-          <h2>{t("What to practise next", "Das sollte sie als Nächstes üben")}</h2>
-          <p>{t("Telling the time to the half hour.", "Die Uhrzeit auf die halbe Stunde lesen.")}</p>
-        </div>
-      </article>
-      <article className="card parent-concepts parent-wide">
-        <p className="kicker">{t("PUBLISHED QUIZZES", "VERÖFFENTLICHTE QUIZZE")}</p>
-        <h2>{t("Progress so far", "Bisheriger Fortschritt")}</h2>
-        {history.map((value, index) => (
-          <div className="parent-concept" key={index}>
-            <span>
-              <small>Quiz {index + 1}</small>
-              <i>
-                <b style={{ width: `${value}%` }} />
-              </i>
-              <small>{value}%</small>
+      <ParentTabs language={language} tab={tab} setTab={setTab} unreadMessages={0} />
+
+      {tab === "overview" && (
+        <>
+          <article className="parent-score card previous-score">
+            <div>
+              <Status type="good">{t("Published", "Veröffentlicht")}</Status>
+              <p className="kicker">{t("QUIZ 3 · MATHEMATICS", "QUIZ 3 · MATHEMATIK")}</p>
+              <h2>{t(latest.en, latest.de)}</h2>
+              <p>{latest.date[language]}</p>
+            </div>
+            <strong>
+              {latest.score}
+              <small>/{latest.of} · {percents[2]}%</small>
+            </strong>
+          </article>
+          <article className="card parent-alert calm parent-wide">
+            <span className="parent-alert-icon">
+              <Icon name="check" />
             </span>
+            <div>
+              <Status type="good">{t("No learning alerts", "Keine Lernhinweise")}</Status>
+              <p>{t("Ms. Hamed has not raised any concern.", "Frau Hamed hat keine Sorge gemeldet.")}</p>
+            </div>
+          </article>
+          <article className="parent-message card">
+            <span>
+              <Icon name="check" />
+            </span>
+            <div>
+              <h2>{t("What’s going well", "Das klappt gut")}</h2>
+              <p>{t("Yara adds two-digit numbers confidently.", "Yara addiert zweistellige Zahlen sicher.")}</p>
+            </div>
+          </article>
+          <article className="parent-message peach card">
+            <span>
+              <Icon name="idea" />
+            </span>
+            <div>
+              <h2>{t("What to practice next", "Das sollte sie als Nächstes üben")}</h2>
+              <p>{t("Telling the time to the half hour.", "Die Uhrzeit auf die halbe Stunde lesen.")}</p>
+            </div>
+          </article>
+          <article className="card parent-practice">
+            <p className="kicker">{t("PRACTICE AT SCHOOL", "ÜBUNG IN DER SCHULE")}</p>
+            <h2>{t("Lesson and pop quiz", "Lektion und Kurz-Quiz")}</h2>
+            <Status type="neutral">{t("No practice assigned right now", "Zurzeit keine Übung zugewiesen")}</Status>
+          </article>
+          <Button icon="message" onClick={() => setTab("messages")}>
+            {t("Message Ms. Hamed", "Frau Hamed schreiben")}
+          </Button>
+        </>
+      )}
+
+      {tab === "results" && (
+        <section className="parent-wide parent-results">
+          <article className="card parent-question-list">
+            {yaraQuizzes
+              .slice()
+              .reverse()
+              .map((q) => (
+                <div className="parent-question" key={q.n}>
+                  <span>
+                    <small>
+                      Quiz {q.n} · {q.date[language]}
+                    </small>
+                    <strong>{t(q.en, q.de)}</strong>
+                  </span>
+                  <Status type="good">{t("Published", "Veröffentlicht")}</Status>
+                  <b>
+                    {q.score} / {q.of}
+                  </b>
+                </div>
+              ))}
+          </article>
+          <p className="parent-note">
+            <Icon name="lock" size={15} />{" "}
+            {t("Ms. Hamed has not given a new quiz since 8 October.", "Frau Hamed hat seit dem 8. Oktober kein neues Quiz gegeben.")}
+          </p>
+        </section>
+      )}
+
+      {tab === "progress" && (
+        <>
+          <article className="card parent-concepts parent-wide">
+            <p className="kicker">{t("PUBLISHED QUIZZES", "VERÖFFENTLICHTE QUIZZE")}</p>
+            <h2>{t("Progress so far", "Bisheriger Fortschritt")}</h2>
+            <LineChart
+              language={language}
+              fontSize={13}
+              title={t("Yara’s quiz results, Quiz 1 to Quiz 3", "Yaras Quizergebnisse, Quiz 1 bis Quiz 3")}
+              xLabels={["Quiz 1", "Quiz 2", "Quiz 3"]}
+              series={[{ name: "Yara", values: percents, color: conceptColors[0], shape: conceptShape(0) }]}
+            />
+          </article>
+          <article className="card parent-concepts parent-wide">
+            <p className="kicker">{t("BY TOPIC", "NACH THEMA")}</p>
+            <h2>{t("How each topic is going", "So entwickeln sich die Themen")}</h2>
+            <LineChart
+              language={language}
+              fontSize={13}
+              title={t("Yara’s score in each topic, Quiz 1 to Quiz 3", "Yaras Ergebnisse pro Thema, Quiz 1 bis Quiz 3")}
+              xLabels={["Quiz 1", "Quiz 2", "Quiz 3"]}
+              series={yaraTopics.map((topic, index) => ({
+                name: t(topic.en, topic.de),
+                values: topic.values,
+                color: conceptColors[index],
+                shape: conceptShape(index),
+              }))}
+            />
+            <div className="topic-status-row">
+              {yaraTopics.map((topic) => (
+                <span key={topic.en}>
+                  <strong>{t(topic.en, topic.de)}</strong>
+                  <Status type={topic.level}>{labels[topic.level]}</Status>
+                </span>
+              ))}
+            </div>
+          </article>
+        </>
+      )}
+
+      {tab === "resources" && (
+        <article className="card parent-wide parent-empty">
+          <Icon name="book" />
+          <div>
+            <h2>{t("No home activities right now", "Zurzeit keine Aktivitäten für zu Hause")}</h2>
+            <p>
+              {t(
+                "When Ms. Hamed recommends practice for Yara, the approved materials appear here.",
+                "Wenn Frau Hamed Übung für Yara empfiehlt, erscheint das freigegebene Material hier.",
+              )}
+            </p>
           </div>
-        ))}
-      </article>
+        </article>
+      )}
+
+      {tab === "messages" && (
+        <article className="card parent-wide parent-chat">
+          <p className="kicker">{t("MESSAGES", "NACHRICHTEN")}</p>
+          <h2>{t("Messages with Ms. Hamed", "Nachrichten mit Frau Hamed")}</h2>
+          {messages.length === 0 ? (
+            <p>{t("No messages yet.", "Noch keine Nachrichten.")}</p>
+          ) : (
+            <div className="chat">
+              {messages.map((m, i) => (
+                <p key={i} className="bubble parent" data-free-text>
+                  <small>
+                    {t("You", "Sie")} · {t("Just now", "Gerade eben")}
+                  </small>
+                  {m.text}
+                </p>
+              ))}
+            </div>
+          )}
+          <label className="parent-field">
+            {t("Your message", "Ihre Nachricht")}
+            <textarea rows={3} value={text} onChange={(e) => setText(e.target.value)} />
+          </label>
+          <Button
+            icon="arrow"
+            disabled={!text.trim()}
+            onClick={() => {
+              yaraMessages = [...messages, { text: text.trim(), at: Date.now() }];
+              setMessages(yaraMessages);
+              setText("");
+              notify(t("Message sent to Ms. Hamed.", "Nachricht an Frau Hamed gesendet."));
+            }}
+          >
+            {t("Send to Ms. Hamed", "An Frau Hamed senden")}
+          </Button>
+        </article>
+      )}
     </>
   );
 }

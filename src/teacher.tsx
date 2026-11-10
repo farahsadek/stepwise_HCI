@@ -1,4 +1,6 @@
 import { useMemo, useState } from "react";
+import { LineChart, conceptColors, conceptShape } from "./charts";
+import { requestReadAloud } from "./accessibility";
 import { logActivity } from "./activity";
 import { Button, Icon, Status } from "./ui";
 import {
@@ -170,6 +172,9 @@ export function NoteComposer({
           <textarea rows={3} value={text} onChange={(e) => setText(e.target.value)} />
         </label>
         <div className="modal-actions">
+          <Button icon="speaker" variant="ghost" className="modal-read" onClick={requestReadAloud}>
+            {t("Read aloud", "Vorlesen")}
+          </Button>
           <Button icon="close" variant="ghost" onClick={onClose}>
             {t("Cancel", "Abbrechen")}
           </Button>
@@ -442,22 +447,29 @@ export function StudentRecord({
         <article className="panel">
           <p className="kicker">{t("ASSESSMENT HISTORY", "BEWERTUNGSVERLAUF")}</p>
           <h2>{t("Quiz results", "Quizergebnisse")}</h2>
-          <div className="mini-bars" aria-label={t("Quiz results chart", "Diagramm der Quizergebnisse")}>
-            {history.map((value, index) => (
-              <span key={index}>
-                <i style={{ height: `${value}%` }} />
-                <b>{value}%</b>
-                <small>Quiz {index + 1}</small>
-              </span>
-            ))}
-          </div>
+          <LineChart
+            language={common.language}
+            fontSize={13}
+            title={t(`${student.name}’s quiz results, Quiz 1 to Quiz 4`, `Quizergebnisse von ${student.name}, Quiz 1 bis Quiz 4`)}
+            xLabels={["Quiz 1", "Quiz 2", "Quiz 3", "Quiz 4"]}
+            pendingNote={t("not confirmed", "nicht bestätigt")}
+            series={[
+              {
+                name: student.name,
+                values: [...student.quizzes.slice(0, 3), q4],
+                color: conceptColors[0],
+                shape: conceptShape(0),
+              },
+            ]}
+          />
           <p className="record-note">
-            {history.length > 1 && history[history.length - 1] > history[0]
+            {history[history.length - 1] > history[0]
               ? t(
                   `Up ${history[history.length - 1] - history[0]} points since Quiz 1.`,
                   `${history[history.length - 1] - history[0]} Punkte mehr seit Quiz 1.`,
                 )
-              : t("Quiz 4 not confirmed yet.", "Quiz 4 noch nicht bestätigt.")}
+              : t("No rise since Quiz 1.", "Kein Anstieg seit Quiz 1.")}{" "}
+            {q4 === null && t("Quiz 4 not confirmed yet.", "Quiz 4 noch nicht bestätigt.")}
           </p>
         </article>
         <article className="panel">
@@ -513,7 +525,7 @@ export function StudentRecord({
           <h2>{t("Follow-up", "Nachverfolgung")}</h2>
           <Status type={practice === "done" ? "good" : practice === "pending" ? "warn" : "neutral"}>
             {practice === "done"
-              ? t(`Done · ${quizScore} of 3 first try`, `Erledigt · ${quizScore} von 3 beim ersten Versuch`)
+              ? t(`Done · pop quiz ${quizScore}/3`, `Erledigt · Kurz-Quiz ${quizScore}/3`)
               : practice === "pending"
                 ? t("Assigned, not done yet", "Zugewiesen, noch nicht erledigt")
                 : t("No practice assigned", "Keine Übung zugewiesen")}
@@ -562,6 +574,7 @@ export function AssessmentsPage({
   const language = common.language;
   const [tab, setTab] = useState<"list" | "scheme" | "submissions">("submissions");
   const [form, setForm] = useState<null | { title: string; subject: string; language: Lang; marks: number; date: string }>(null);
+  const [modelFile, setModelFile] = useState<string | null>(null);
   const status = (student: RosterStudent) => {
     if (student.name === "Khadija") {
       if (!khadija.ocrVerified) return { type: "warn" as const, label: t("Check extracted text", "Erkannten Text prüfen"), action: true };
@@ -768,6 +781,7 @@ export function AssessmentsPage({
                 }));
                 common.notify(t("Assessment saved as a draft.", "Prüfung als Entwurf gespeichert."));
                 setForm(null);
+                setModelFile(null);
               }}
             >
               <h2>{t("New assessment", "Neue Prüfung")}</h2>
@@ -808,10 +822,18 @@ export function AssessmentsPage({
                 {t("Date", "Datum")}
                 <input type="date" value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value })} />
               </label>
-              <label>
-                {t("Model answers (photo or PDF)", "Musterlösungen (Foto oder PDF)")}
-                <input type="file" accept="image/*,application/pdf" />
-              </label>
+              <div className="form-field">
+                <span>{t("Model answers (photo or PDF)", "Musterlösungen (Foto oder PDF)")}</span>
+                <label className="button secondary file-choice model-file">
+                  <Icon name="book" />
+                  <span>{modelFile ?? t("Choose a file", "Datei wählen")}</span>
+                  <input
+                    type="file"
+                    accept="image/*,application/pdf"
+                    onChange={(e) => setModelFile(e.target.files?.[0]?.name ?? null)}
+                  />
+                </label>
+              </div>
               <div className="modal-actions">
                 <Button icon="close" variant="ghost" onClick={() => setForm(null)}>
                   {t("Cancel", "Abbrechen")}

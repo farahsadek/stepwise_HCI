@@ -5808,3 +5808,329 @@ label.class-picker,
   max-width: 100%;
   white-space: normal;
 }
+
+/* ---------- Line chart (topic progress) ---------- */
+.line-chart {
+  --chart-surface: #ffffff;
+  margin: 12px 0 0;
+}
+.line-chart-legend {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 18px;
+  margin-bottom: 8px;
+  font-size: var(--chart-font, 14px);
+  color: var(--ink);
+}
+.line-chart-legend > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.chart-table-toggle {
+  margin-left: auto;
+  padding: 0 12px;
+  font-size: var(--chart-font, 14px);
+  font-weight: 700;
+  color: var(--ink);
+  background: var(--white);
+  border: 1.5px solid var(--ink);
+  border-radius: 999px;
+}
+.parent-shell .chart-table-toggle,
+.teacher-shell .chart-table-toggle {
+  min-height: 36px;
+  border-width: 1px;
+  border-radius: 8px;
+}
+.line-chart-plot {
+  position: relative;
+  width: 100%;
+}
+.line-chart-plot svg {
+  display: block;
+  overflow: visible;
+}
+.line-chart-plot rect:focus {
+  outline: none;
+}
+.line-chart-plot rect:focus-visible {
+  outline: 2px solid var(--ink);
+}
+.chart-grid {
+  stroke: rgba(53, 67, 61, 0.14);
+  stroke-width: 1;
+}
+.chart-crosshair {
+  stroke: rgba(53, 67, 61, 0.45);
+  stroke-width: 1;
+}
+.chart-axis {
+  font-size: var(--chart-font, 14px);
+  fill: rgba(53, 67, 61, 0.78);
+}
+.chart-axis.muted {
+  font-style: italic;
+}
+.chart-end-label {
+  font-size: var(--chart-font, 14px);
+  fill: var(--ink);
+}
+.chart-end-value {
+  font-weight: 800;
+}
+.chart-tooltip {
+  position: absolute;
+  top: 4px;
+  z-index: 2;
+  display: grid;
+  gap: 4px;
+  width: 190px;
+  padding: 10px 12px;
+  font-size: var(--chart-font, 14px);
+  color: var(--ink);
+  background: var(--white);
+  border: 1.5px solid var(--ink);
+  border-radius: 10px;
+  box-shadow: 0 6px 18px rgba(53, 67, 61, 0.16);
+  pointer-events: none;
+}
+.chart-tooltip span {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.chart-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--chart-font, 14px);
+}
+.chart-table caption {
+  margin-bottom: 6px;
+  text-align: left;
+  font-weight: 700;
+}
+.chart-table th,
+.chart-table td {
+  padding: 8px 6px;
+  text-align: left;
+  border-top: 1px solid var(--line);
+}
+html[data-contrast="high"] .student-shell .chart-axis,
+html[data-contrast="high"] .student-shell .chart-end-label {
+  fill: #000;
+}
+.topic-growth-card {
+  margin-top: 16px;
+  padding: 22px 24px;
+}
+.student-main .topic-growth-card {
+  border: 2px solid var(--ink);
+  border-radius: 18px 12px 20px 14px;
+}
+.topic-status-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 22px;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+.topic-status-row > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.student-chart-labels {
+  display: flex;
+  justify-content: space-around;
+  margin-top: 6px;
+  font-size: 14px;
+}
+.student-main .progress-pending {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+/* ---------- Pop quiz ---------- */
+.pie-row {
+  display: flex;
+  gap: 10px;
+  justify-content: center;
+}
+.pie.pie-small {
+  width: 84px;
+  height: 84px;
+}
+.student-main .quiz-hint {
+  margin: 18px 0 14px;
+  color: rgba(53, 67, 61, 0.8);
+}
+.question-row .quiz-right-answer {
+  display: block;
+  margin-top: 2px;
+  color: var(--ink) !important;
+}
+.quiz-recommendation {
+  display: grid;
+  grid-template-columns: 55px 1fr;
+  gap: 14px;
+  margin-top: 16px;
+  padding: 20px 22px;
+  background: #fff4dc;
+  border: 2px solid var(--ink);
+  border-radius: 15px 23px 13px 19px;
+  box-shadow: 5px 6px 0 var(--butter);
+}
+.quiz-recommendation.done {
+  background: #eef4ef;
+  box-shadow: 5px 6px 0 var(--sage);
+}
+.quiz-recommendation h2 {
+  margin: 4px 0 6px;
+}
+.quiz-recommendation ol {
+  margin: 0;
+  padding-left: 20px;
+  line-height: 1.6;
+}
+.quiz-recommendation .lesson-actions {
+  grid-column: 1 / -1;
+  justify-content: flex-start;
+}
+@media (max-width: 560px) {
+  .pie.pie-small {
+    width: 60px;
+    height: 60px;
+  }
+  .quiz-recommendation {
+    grid-template-columns: 1fr;
+  }
+}
+/* Tailwind preflight removes list markers; numbered steps need them back. */
+.quiz-recommendation ol,
+.lesson-steps,
+.parent-resource-grid ol {
+  list-style: decimal;
+}
+.parent-report ul {
+  list-style: disc;
+}
+
+/* ---------- Teacher record + assessment form layout fixes ---------- */
+.record-grid > .panel > * {
+  min-width: 0;
+}
+.record-grid .evidence-timeline {
+  grid-template-columns: repeat(auto-fit, minmax(96px, 1fr));
+  margin: 8px 0;
+}
+.record-grid .evidence-timeline article {
+  padding: 12px;
+}
+.record-grid .line-chart {
+  margin-top: 4px;
+}
+.assessment-form > * {
+  min-width: 0;
+}
+.assessment-form input,
+.assessment-form select {
+  width: 100%;
+}
+.form-field {
+  display: grid;
+  gap: 4px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #4a5a53;
+}
+.assessment-form .model-file {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 38px;
+  justify-content: flex-start;
+  font-weight: 600;
+}
+.assessment-form .model-file > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.assessment-row {
+  grid-template-columns: 1.6fr 1fr 1fr 170px;
+}
+.assessment-row > .status {
+  justify-self: end;
+}
+@media (max-width: 760px) {
+  .assessment-row {
+    grid-template-columns: 1fr 1fr;
+  }
+  .assessment-row > .status {
+    justify-self: start;
+  }
+}
+/* The chart measures its box; its own SVG width must not feed back into that box. */
+.line-chart {
+  min-width: 0;
+}
+.line-chart-plot {
+  contain: inline-size;
+}
+
+/* ---------- Read aloud (teacher + parent top bar) ---------- */
+.read-aloud-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 48px;
+  padding: 0 14px;
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--ink);
+  background: var(--white);
+  border: 1px solid rgba(53, 67, 61, 0.28);
+  border-radius: 10px;
+  white-space: nowrap;
+}
+.read-aloud-button:hover {
+  border-color: var(--ink);
+}
+.read-aloud-button.active {
+  color: #fff;
+  background: var(--ink);
+  border-color: var(--ink);
+}
+@media (max-width: 760px) {
+  .read-aloud-button {
+    width: 44px;
+    height: 44px;
+    flex: 0 0 44px;
+    justify-content: center;
+    padding: 0;
+  }
+  /* Icon only on small screens; the label stays available to screen readers. */
+  .read-aloud-button > span {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+  }
+}
+@media (max-width: 440px) {
+  /* Room for the Read aloud button: the logo keeps its icon, the word is dropped. */
+  .topbar.parent .logo strong {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+  }
+}

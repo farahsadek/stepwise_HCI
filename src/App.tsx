@@ -19,9 +19,16 @@ import { AccessibilityToolbar, ReadAloudButton, requestReadAloud } from "./acces
 import { Button, Icon, Status, type IconName } from "./ui";
 import {
   flaggedReadings,
+  answerOf,
+  defaultPlan,
   khadijaConcepts,
+  optionsFor,
+  markOf,
+  marksTotal,
   newId,
   questions,
+  roster,
+  specOf,
   updateClassState,
   useClassState,
   type FlaggedReading,
@@ -38,7 +45,7 @@ import {
   OcrQueue,
   QuestionReview,
   QuizMonitor,
-  ResourcesPanel,
+  GapReview,
   RosterPage,
   SkillTree,
   StudentRecord,
@@ -51,6 +58,7 @@ import {
 import {
   ChildSwitcher,
   LearningAlert,
+  ParentGapOverview,
   ParentConcepts,
   ParentMessages,
   ParentProfile,
@@ -64,7 +72,15 @@ import {
   type ParentQuiz,
   type ParentTab,
 } from "./parent";
-import { CameraCapture, ExplainerVideo, analyzePage, type PageQuality } from "./student-media";
+import {
+  CameraCapture,
+  ExamplePhoto,
+  ExplainerVideo,
+  PhotoExamples,
+  ScanGuide,
+  analyzePage,
+  type PageQuality,
+} from "./student-media";
 import { LineChart, conceptColors, conceptShape } from "./charts";
 
 type Role = "student" | "teacher" | "parent";
@@ -1096,7 +1112,14 @@ type UploadPage = {
   url: string | null;
   kind: "photo" | "sample" | "image" | "pdf";
   quality: PageQuality;
+  /** The student's own check in the review step: null = not looked at yet. */
+  review: "ok" | "problem" | null;
+  /** What the student said is wrong with the page. */
+  problem: PageProblem | null;
 };
+type PageProblem = "unclear" | "cutoff" | "wrong";
+/** Quiz 4 is a two-page paper; fewer pages usually means one was missed. */
+const QUIZ_PAGES = 2;
 
 function PageThumb({ page, label, index }: { page: UploadPage; label: string; index: number }) {
   if (page.url) return <img src={page.url} alt={`${label} ${index + 1}`} />;
@@ -1203,6 +1226,11 @@ function StudentApp({
   const nextPageId = useRef(1);
   // Demo script: the first sample photo is blurry, every later one is clear.
   const samplePhotos = useRef(0);
+  // Review step: page open in the large viewer, its zoom, and the "fewer pages" acknowledgement.
+  const [viewerId, setViewerId] = useState<number | null>(null);
+  const [viewerZoom, setViewerZoom] = useState(false);
+  useEscape(viewerId !== null, () => setViewerId(null));
+  const [fewerPagesOk, setFewerPagesOk] = useState(false);
   const [practicePhase, setPracticePhase] = useState<PracticePhase>("lesson");
   const [quizAnswers, setQuizAnswers] = useState<number[]>([]);
   const [quizRound, setQuizRound] = useState(0);
@@ -1215,7 +1243,11 @@ function StudentApp({
   const de = language === "DE";
   const t = (en: string, german: string) => (de ? german : en);
   // Students never see a score until the teacher publishes.
-  const score = published && awardedMark !== null ? 14 + awardedMark : null;
+  const marksState = useClassState();
+  // The practice Ms. Ashraf approved for Khadija (video, lesson note, printable).
+  const khadijaPlan = marksState.resourcePlans.Khadija ?? defaultPlan("compare");
+  const khadijaPrintable = optionsFor("compare").find((o) => o.id === khadijaPlan.printable);
+  const score = published && awardedMark !== null ? marksTotal(roster[0], marksState, 2) + awardedMark : null;
   const percent = score === null ? null : Math.round((score / 25) * 100);
   const trackerStage = published ? 5 : awardedMark !== null ? 4 : ocrVerified ? 3 : 1;
   const flagShared = published && redFlagDecision === "confirmed";
@@ -1339,30 +1371,61 @@ function StudentApp({
     analyzePage(url).then((quality) =>
       setPages((current) => current.map((item) => (item.id === id ? { ...item, quality } : item))),
     );
-  const addFilePage = (file: File) => {
+  const fresh = { review: null, problem: null } as const;
+  const addFilePage = (file: File, replaceId: number | null = null) => {
     const id = nextPageId.current++;
     if (file.type === "application/pdf") {
-      putPage({ id, name: file.name, url: null, kind: "pdf", quality: "pdf" }, null);
+      putPage({ id, name: file.name, url: null, kind: "pdf", quality: "pdf", ...fresh }, replaceId);
       return;
     }
     const url = URL.createObjectURL(file);
-    putPage({ id, name: file.name, url, kind: "image", quality: "checking" }, null);
+    putPage({ id, name: file.name, url, kind: "image", quality: "checking", ...fresh }, replaceId);
     checkPage(id, url);
   };
   const addCameraPage = (url: string) => {
     const id = nextPageId.current++;
-    putPage({ id, name: "", url, kind: "photo", quality: "checking" }, camera?.replaceId ?? null);
+    putPage({ id, name: "", url, kind: "photo", quality: "checking", ...fresh }, camera?.replaceId ?? null);
     checkPage(id, url);
     setCamera(null);
   };
   const addSamplePage = () => {
     const quality: PageQuality = samplePhotos.current++ === 0 ? "blurry" : "good";
     putPage(
-      { id: nextPageId.current++, name: "", url: null, kind: "sample", quality },
+      { id: nextPageId.current++, name: "", url: null, kind: "sample", quality, ...fresh },
       camera?.replaceId ?? null,
     );
     setCamera(null);
   };
+  const reviewPage = (id: number, review: UploadPage["review"], problem: PageProblem | null = null) =>
+    setPages((current) => current.map((item) => (item.id === id ? { ...item, review, problem } : item)));
+  const removePage = (id: number) => {
+    setPages((current) => current.filter((item) => item.id !== id));
+    if (viewerId === id) setViewerId(null);
+  };
+  const checkedCount = pages.filter((page) => page.review === "ok").length;
+  const allPagesChecked = pages.length > 0 && checkedCount === pages.length;
+  const pageCountOk = pages.length >= QUIZ_PAGES || fewerPagesOk;
+  const problemAdvice = (problem: PageProblem) =>
+    ({
+      unclear: t(
+        "Take it again in good light and hold still.",
+        "Mach das Foto nochmal bei gutem Licht und halte still.",
+      ),
+      cutoff: t(
+        "Take it again. Make sure all 4 corners are in the frame.",
+        "Mach das Foto nochmal. Alle 4 Ecken müssen im Rahmen sein.",
+      ),
+      wrong: t(
+        "Remove it, or replace it with the right page.",
+        "Entferne sie oder ersetze sie durch die richtige Seite.",
+      ),
+    })[problem];
+  const uploadStepNames = [
+    t("Choose exam", "Arbeit wählen"),
+    t("Take photos", "Fotos machen"),
+    t("Check pages", "Seiten prüfen"),
+    t("Done", "Fertig"),
+  ];
   const qualityStatus = (quality: PageQuality) =>
     ({
       checking: { type: "neutral" as const, label: t("Checking…", "Wird geprüft…"), advice: "" },
@@ -1763,7 +1826,7 @@ function StudentApp({
                           : q.state === "warn"
                             ? t("Keep practicing", "Weiter üben")
                             : t("Practice opportunity", "Übungsmöglichkeit");
-                    const mark = q.n === 2 ? `${awardedMark} / 3` : q.marks;
+                    const mark = q.n === 2 ? `${awardedMark} / 3` : `${markOf(roster[0], q.n, marksState)} / ${specOf(q.n).out}`;
                     const answer =
                       q.n === 2
                         ? studentAnswer
@@ -1913,7 +1976,12 @@ function StudentApp({
               <Status type="good">{t("Chosen by Ms. Ashraf", "Von Frau Ashraf ausgewählt")}</Status>
             </div>
             <article className="practice-card card lesson-card">
-              {classState.resources.video && <ExplainerVideo language={language} />}
+              {khadijaPlan.lessonNote && (
+                <p className="teacher-lesson-note">
+                  <b>{t("Ms. Ashraf:", "Frau Ashraf:")}</b> {khadijaPlan.lessonNote}
+                </p>
+              )}
+              {khadijaPlan.video && <ExplainerVideo language={language} />}
               <ol className="lesson-steps">
                 <li>
                   {t(
@@ -1941,27 +2009,20 @@ function StudentApp({
                 >
                   {t("Start the quiz", "Quiz starten")}
                 </Button>
-                {classState.resources.printable !== "none" && (
+                {khadijaPrintable && (
                   <Button
                     icon="book"
                     variant="secondary"
                     onClick={() =>
                       notify(
-                        classState.resources.printable === "game"
-                          ? t(
-                              "Fraction strips game ready to print (demo only).",
-                              "Bruchstreifen-Spiel zum Drucken bereit (nur Demo).",
-                            )
-                          : t(
-                              "Worksheet ready to print (demo only).",
-                              "Arbeitsblatt zum Drucken bereit (nur Demo).",
-                            ),
+                        t(
+                          `${khadijaPrintable.title.EN} ready to print (demo only).${khadijaPlan.printableNote ? ` Note: ${khadijaPlan.printableNote}` : ""}`,
+                          `${khadijaPrintable.title.DE} zum Drucken bereit (nur Demo).${khadijaPlan.printableNote ? ` Hinweis: ${khadijaPlan.printableNote}` : ""}`,
+                        ),
                       )
                     }
                   >
-                    {classState.resources.printable === "game"
-                      ? t("Print fraction strips game", "Bruchstreifen-Spiel drucken")
-                      : t("Print worksheet", "Arbeitsblatt drucken")}
+                    {t("Print", "Drucken")}: {khadijaPrintable.title[language]}
                   </Button>
                 )}
               </div>
@@ -2054,9 +2115,30 @@ function StudentApp({
                   const right = answers.filter((answer, i) => answer === practiceQuestions[i].correct).length;
                   setPracticed(true);
                   setPracticeScore(right);
+                  // Before practice: Quiz 4 · Q7 (comparing fractions) was 0/3.
+                  const before = 0;
+                  const after = Math.round((right / 3) * 100);
+                  const previous = classState.popQuizzes.Khadija ?? [];
+                  const clock = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+                  updateClassState((st) => {
+                    const { Khadija: _old, ...outcomes } = st.gapOutcome;
+                    return {
+                      popQuizzes: {
+                        ...st.popQuizzes,
+                        Khadija: [
+                          ...(st.popQuizzes.Khadija ?? []),
+                          { score: right, before, round: previous.length + 1, at: { EN: `Today, ${clock}`, DE: `Heute, ${clock}` } },
+                        ],
+                      },
+                      // A new result needs a new decision from the teacher.
+                      gapOutcome: outcomes,
+                    };
+                  });
+                  const last = previous[previous.length - 1];
+                  const sinceLast = last ? after - Math.round((last.score / 3) * 100) : null;
                   logActivity("practice", "Khadija", {
-                    EN: `Fraction pop quiz${quizRound > 0 ? " (new questions)" : ""}: ${right}/3 right`,
-                    DE: `Bruch-Kurz-Quiz${quizRound > 0 ? " (neue Fragen)" : ""}: ${right}/3 richtig`,
+                    EN: `Fraction pop quiz, try ${previous.length + 1}: ${right}/3 (${after}%) · comparing fractions ${before}% → ${after}% (${after - before >= 0 ? "+" : ""}${after - before} points)${sinceLast !== null ? ` · ${sinceLast >= 0 ? "+" : ""}${sinceLast} since last try` : ""}`,
+                    DE: `Bruch-Kurz-Quiz, Versuch ${previous.length + 1}: ${right}/3 (${after} %) · Brüche vergleichen ${before} % → ${after} % (${after - before >= 0 ? "+" : ""}${after - before} Punkte)${sinceLast !== null ? ` · ${sinceLast >= 0 ? "+" : ""}${sinceLast} seit dem letzten Versuch` : ""}`,
                   });
                   addNotification(
                     "teacher",
@@ -2065,8 +2147,8 @@ function StudentApp({
                       DE: "Khadija hat die Übung abgeschlossen",
                     },
                     {
-                      EN: `Khadija finished the fraction pop quiz: ${right} of 3 right.${right < 3 ? " Stepwise recommended more practice." : ""}`,
-                      DE: `Khadija hat das Bruch-Kurz-Quiz beendet: ${right} von 3 richtig.${right < 3 ? " Stepwise hat weitere Übung empfohlen." : ""}`,
+                      EN: `Khadija finished the fraction pop quiz: ${right} of 3 right (comparing fractions ${before}% → ${after}%).${right < 3 ? " Stepwise recommended more practice." : ""}`,
+                      DE: `Khadija hat das Bruch-Kurz-Quiz beendet: ${right} von 3 richtig (Brüche vergleichen ${before} % → ${after} %).${right < 3 ? " Stepwise hat weitere Übung empfohlen." : ""}`,
                     },
                     { EN: "View progress", DE: "Fortschritt ansehen" },
                     "insights",
@@ -2256,9 +2338,20 @@ function StudentApp({
                 <span className={uploadStep >= 2 ? "active" : ""} />
                 <span className={uploadStep >= 3 ? "active" : ""} />
                 <small>
-                  {uploadStep + 1} {t("of", "von")} 4
+                  {t("Step", "Schritt")} {uploadStep + 1} {t("of", "von")} 4: {uploadStepNames[uploadStep]}
                 </small>
               </div>
+              <ol className="upload-step-names" aria-hidden="true">
+                {uploadStepNames.map((name, index) => (
+                  <li
+                    key={name}
+                    className={index === uploadStep ? "current" : index < uploadStep ? "done" : ""}
+                  >
+                    <span>{index < uploadStep ? <Icon name="check" size={14} /> : index + 1}</span>
+                    {name}
+                  </li>
+                ))}
+              </ol>
               {uploadStep === 0 && (
                 <>
                   <Icon name="book" size={42} />
@@ -2281,30 +2374,15 @@ function StudentApp({
                   <h2>{t("Add your pages", "Füge deine Seiten hinzu")}</h2>
                   <p>
                     {t(
-                      "Take a photo of each page, or choose a file.",
-                      "Mache von jeder Seite ein Foto oder wähle eine Datei.",
+                      "Take a photo of each page, or choose a file. Follow the pictures.",
+                      "Mache von jeder Seite ein Foto oder wähle eine Datei. Folge den Bildern.",
                     )}
                   </p>
-                  <ol
-                    className="photo-tips"
-                    aria-label={t("How to take a good photo", "So gelingt ein gutes Foto")}
-                  >
-                    <li>
-                      <Icon name="book" size={22} />
-                      {t("Put the paper flat on a table.", "Lege das Blatt flach auf den Tisch.")}
-                    </li>
-                    <li>
-                      <Icon name="idea" size={22} />
-                      {t("Use good light, no shadows.", "Nutze gutes Licht, keine Schatten.")}
-                    </li>
-                    <li>
-                      <Icon name="eye" size={22} />
-                      {t(
-                        "Fit the whole page in the frame.",
-                        "Die ganze Seite muss in den Rahmen passen.",
-                      )}
-                    </li>
-                  </ol>
+                  <details className="scan-help" open={pages.length === 0}>
+                    <summary>{t("How to take a good photo", "So gelingt ein gutes Foto")}</summary>
+                    <ScanGuide language={language} />
+                    <PhotoExamples language={language} />
+                  </details>
                   <div className="lesson-actions">
                     <Button icon="eye" onClick={() => setCamera({ replaceId: null })}>
                       {t("Take a photo", "Foto machen")}
@@ -2327,6 +2405,17 @@ function StudentApp({
                     {t(
                       "Photo or PDF. Your teacher checks it first.",
                       "Foto oder PDF. Deine Lehrerin prüft es zuerst.",
+                    )}
+                  </p>
+                  <p className="page-count" role="status">
+                    <span className="page-count-dots" aria-hidden="true">
+                      {Array.from({ length: Math.max(QUIZ_PAGES, pages.length) }, (_, index) => (
+                        <i key={index} className={index < pages.length ? "filled" : ""} />
+                      ))}
+                    </span>
+                    {t(
+                      `Quiz 4 has ${QUIZ_PAGES} pages. You added ${pages.length}.`,
+                      `Quiz 4 hat ${QUIZ_PAGES} Seiten. Du hast ${pages.length} hinzugefügt.`,
                     )}
                   </p>
                   {pages.length > 0 && (
@@ -2353,11 +2442,7 @@ function StudentApp({
                                 <Icon name="eye" size={16} />
                                 {t("Retake", "Neu")}
                               </button>
-                              <button
-                                onClick={() =>
-                                  setPages((current) => current.filter((item) => item.id !== page.id))
-                                }
-                              >
+                              <button onClick={() => removePage(page.id)}>
                                 <Icon name="close" size={16} />
                                 {t("Remove", "Entfernen")}
                               </button>
@@ -2389,21 +2474,165 @@ function StudentApp({
               )}
               {uploadStep === 2 && (
                 <>
-                  <Status type="good">{t("All pages are clear", "Alle Seiten sind gut lesbar")}</Status>
+                  {allPagesChecked && pagesReady ? (
+                    <Status type="good">{t("All pages checked", "Alle Seiten geprüft")}</Status>
+                  ) : (
+                    <Status type="neutral">
+                      {checkedCount} {t("of", "von")} {pages.length} {t("pages checked", "Seiten geprüft")}
+                    </Status>
+                  )}
                   <h2>{t("Check your pages", "Prüfe deine Seiten")}</h2>
                   <p>
                     {t(
-                      "Is every page there and easy to read?",
-                      "Sind alle Seiten da und gut lesbar?",
+                      "Tap a page to see it big. Then answer for each page.",
+                      "Tippe auf eine Seite, um sie groß zu sehen. Dann antworte für jede Seite.",
                     )}
                   </p>
-                  <div className="page-grid">
+                  <ul className="review-questions" aria-label={t("Ask yourself", "Frag dich")}>
+                    <li>
+                      <Icon name="eye" size={22} />
+                      {t("Can I read every word?", "Kann ich jedes Wort lesen?")}
+                    </li>
+                    <li>
+                      <Icon name="grid" size={22} />
+                      {t("Are all 4 corners there?", "Sind alle 4 Ecken da?")}
+                    </li>
+                    <li>
+                      <Icon name="book" size={22} />
+                      {t("Is it the right page?", "Ist es die richtige Seite?")}
+                    </li>
+                  </ul>
+                  {pages.length < QUIZ_PAGES && (
+                    <div className="missing-pages">
+                      <ErrorNote>
+                        {t(
+                          `Quiz 4 has ${QUIZ_PAGES} pages, but you added ${pages.length}. Is a page missing?`,
+                          `Quiz 4 hat ${QUIZ_PAGES} Seiten, du hast aber ${pages.length} hinzugefügt. Fehlt eine Seite?`,
+                        )}
+                      </ErrorNote>
+                      <div className="missing-actions">
+                        <Button icon="eye" variant="secondary" onClick={() => setCamera({ replaceId: null })}>
+                          {t("Add a page", "Seite hinzufügen")}
+                        </Button>
+                        <label className="check-line">
+                          <input
+                            type="checkbox"
+                            checked={fewerPagesOk}
+                            onChange={(event) => setFewerPagesOk(event.target.checked)}
+                          />
+                          {t("No, that is all my pages", "Nein, das sind alle meine Seiten")}
+                        </label>
+                      </div>
+                    </div>
+                  )}
+                  <div className="page-grid review-grid">
                     {pages.map((page, index) => (
-                      <figure className="upload-preview" key={page.id}>
-                        <PageThumb page={page} label={t("Page", "Seite")} index={index} />
+                      <figure
+                        className={`upload-preview review-card ${page.review ?? "unchecked"}`}
+                        key={page.id}
+                      >
+                        <button
+                          className="thumb-button"
+                          onClick={() => {
+                            setViewerZoom(false);
+                            setViewerId(page.id);
+                          }}
+                          aria-label={t(`Look at page ${index + 1} big`, `Seite ${index + 1} groß ansehen`)}
+                        >
+                          <PageThumb page={page} label={t("Page", "Seite")} index={index} />
+                          <span className="thumb-zoom">
+                            <Icon name="eye" size={16} />
+                            {t("See big", "Groß ansehen")}
+                          </span>
+                        </button>
                         <figcaption>
                           {t("Page", "Seite")} {index + 1}
                         </figcaption>
+                        {page.quality !== "good" && page.quality !== "pdf" && (
+                          <>
+                            <Status type={qualityStatus(page.quality).type}>
+                              {qualityStatus(page.quality).label}
+                            </Status>
+                            {qualityStatus(page.quality).advice && (
+                              <ErrorNote>{qualityStatus(page.quality).advice}</ErrorNote>
+                            )}
+                          </>
+                        )}
+                        {page.review === null && (
+                          <div className="review-choice">
+                            <button className="ok" onClick={() => reviewPage(page.id, "ok")}>
+                              <Icon name="check" size={16} />
+                              {t("Looks good", "Sieht gut aus")}
+                            </button>
+                            <button className="fix" onClick={() => reviewPage(page.id, "problem")}>
+                              <Icon name="warning" size={16} />
+                              {t("Fix it", "Reparieren")}
+                            </button>
+                          </div>
+                        )}
+                        {page.review === "ok" && (
+                          <div className="review-done">
+                            <Status type="good">{t("Checked", "Geprüft")}</Status>
+                            <button className="text-button" onClick={() => reviewPage(page.id, null)}>
+                              {t("Undo", "Zurück")}
+                            </button>
+                          </div>
+                        )}
+                        {page.review === "problem" && (
+                          <div className="review-fix">
+                            <p>{t("What is wrong?", "Was stimmt nicht?")}</p>
+                            <div
+                              className="problem-options"
+                              role="group"
+                              aria-label={t("What is wrong?", "Was stimmt nicht?")}
+                            >
+                              {(
+                                [
+                                  ["unclear", "blurry", t("Hard to read", "Schwer lesbar")],
+                                  ["cutoff", "cutoff", t("Part is cut off", "Teil fehlt")],
+                                  ["wrong", "good", t("Wrong page", "Falsche Seite")],
+                                ] as const
+                              ).map(([problem, picture, label]) => (
+                                <button
+                                  key={problem}
+                                  className={page.problem === problem ? "selected" : ""}
+                                  aria-pressed={page.problem === problem}
+                                  onClick={() => reviewPage(page.id, "problem", problem)}
+                                >
+                                  <ExamplePhoto kind={picture} />
+                                  {label}
+                                </button>
+                              ))}
+                            </div>
+                            {page.problem && <p className="page-advice">{problemAdvice(page.problem)}</p>}
+                            <div className="page-actions three">
+                              <button onClick={() => setCamera({ replaceId: page.id })}>
+                                <Icon name="eye" size={16} />
+                                {t("Retake", "Neu")}
+                              </button>
+                              <label className="file-choice">
+                                <Icon name="book" size={16} />
+                                {t("New file", "Neue Datei")}
+                                <input
+                                  type="file"
+                                  accept="image/*,application/pdf"
+                                  onChange={(event) => {
+                                    const file = event.target.files?.[0];
+                                    if (file) addFilePage(file, page.id);
+                                    event.target.value = "";
+                                  }}
+                                />
+                              </label>
+                              <button onClick={() => removePage(page.id)}>
+                                <Icon name="close" size={16} />
+                                {t("Remove", "Entfernen")}
+                              </button>
+                            </div>
+                            <button className="text-button" onClick={() => reviewPage(page.id, null)}>
+                              {t("Cancel, it is fine", "Abbrechen, sie ist gut")}
+                            </button>
+                          </div>
+                        )}
                       </figure>
                     ))}
                   </div>
@@ -2431,15 +2660,29 @@ function StudentApp({
                       )}
                     </ErrorNote>
                   )}
+                  {pages.length > 0 && !allPagesChecked && (
+                    <p className="upload-hint" role="status">
+                      {t(
+                        "Tap “Looks good” or “Fix it” on every page. Then you can send.",
+                        "Tippe bei jeder Seite auf „Sieht gut aus“ oder „Reparieren“. Dann kannst du senden.",
+                      )}
+                    </p>
+                  )}
                   <div className="lesson-actions">
                     <Button icon="edit" variant="secondary" onClick={() => setUploadStep(1)}>
                       {t("Change pages", "Seiten ändern")}
                     </Button>
                     <Button
                       icon="arrow"
-                      disabled={!languageChosen || !pagesReady}
+                      disabled={!languageChosen || !pagesReady || !allPagesChecked || !pageCountOk}
                       onClick={() => {
                         setUploadStep(3);
+                        updateClassState((current) => ({
+                          studentScans: {
+                            ...current.studentScans,
+                            Khadija: pages.map((page) => ({ name: page.name, url: page.url })),
+                          },
+                        }));
                         logActivity("submitted", "Khadija", {
                           EN: `Quiz 4 submitted (${pages.length} ${pages.length === 1 ? "page" : "pages"}, ${examLanguage === "DE" ? "German" : "English"} exam)`,
                           DE: `Quiz 4 eingereicht (${pages.length} ${pages.length === 1 ? "Seite" : "Seiten"}, ${examLanguage === "DE" ? "deutsche" : "englische"} Arbeit)`,
@@ -2739,6 +2982,96 @@ function StudentApp({
           onClose={() => setCamera(null)}
         />
       )}
+      {viewerId !== null &&
+        (() => {
+          const index = pages.findIndex((page) => page.id === viewerId);
+          const page = pages[index];
+          if (!page) return null;
+          const go = (step: number) => {
+            setViewerZoom(false);
+            setViewerId(pages[index + step].id);
+          };
+          return (
+            <div className="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="viewer-title">
+              <div className="modal page-viewer">
+                <button
+                  className="modal-close"
+                  onClick={() => setViewerId(null)}
+                  aria-label={t("Close", "Schließen")}
+                  title={t("Close", "Schließen")}
+                >
+                  <Icon name="close" />
+                </button>
+                <h2 id="viewer-title">
+                  {t("Page", "Seite")} {index + 1} {t("of", "von")} {pages.length}
+                </h2>
+                <p>
+                  {t(
+                    "Can you read every word? Are all 4 corners there?",
+                    "Kannst du jedes Wort lesen? Sind alle 4 Ecken da?",
+                  )}
+                </p>
+                <div className={`viewer-frame ${viewerZoom ? "zoomed" : ""}`}>
+                  {page.url ? (
+                    <img src={page.url} alt={`${t("Page", "Seite")} ${index + 1}`} />
+                  ) : (
+                    <PageThumb page={page} label={t("Page", "Seite")} index={index} />
+                  )}
+                </div>
+                {page.url && (
+                  <button className="text-button viewer-zoom" onClick={() => setViewerZoom((zoom) => !zoom)}>
+                    <Icon name="eye" size={16} />
+                    {viewerZoom ? t("Make smaller", "Kleiner machen") : t("Zoom in", "Vergrößern")}
+                  </button>
+                )}
+                <div className="modal-actions viewer-actions">
+                  <button
+                    type="button"
+                    className="button ghost"
+                    disabled={index === 0}
+                    onClick={() => go(-1)}
+                  >
+                    {t("Previous", "Zurück")}
+                  </button>
+                  <button
+                    type="button"
+                    className="button secondary"
+                    onClick={() => {
+                      reviewPage(page.id, "problem", page.problem);
+                      setViewerId(null);
+                    }}
+                  >
+                    <Icon name="warning" />
+                    {t("Fix it", "Reparieren")}
+                  </button>
+                  <button
+                    type="button"
+                    className="button primary"
+                    onClick={() => {
+                      reviewPage(page.id, "ok");
+                      const next = pages.slice(index + 1).find((item) => item.review !== "ok");
+                      if (next) {
+                        setViewerZoom(false);
+                        setViewerId(next.id);
+                      } else setViewerId(null);
+                    }}
+                  >
+                    <Icon name="check" />
+                    {t("Looks good", "Sieht gut aus")}
+                  </button>
+                  <button
+                    type="button"
+                    className="button ghost"
+                    disabled={index === pages.length - 1}
+                    onClick={() => go(1)}
+                  >
+                    {t("Next", "Weiter")}
+                  </button>
+                </div>
+              </div>
+            </div>
+          );
+        })()}
       {helpRequest && (
         <div className="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="help-title">
           <div className="modal help-modal">
@@ -3009,6 +3342,8 @@ function TeacherApp({
   useEscape(drawer, () => setDrawer(false));
   const [overrideAnswer, setOverrideAnswer] = useState(studentAnswer);
   const [overrideMark, setOverrideMark] = useState(3);
+  // Which question the override dialog changes (the review's own question, or any other one).
+  const [overrideQ, setOverrideQ] = useState(2);
   const classState = useClassState();
   const otherReviewed = classState.otherReviewed as ReviewStudent[];
   const setOtherReviewed = (next: ReviewStudent[]) => updateClassState({ otherReviewed: next });
@@ -3020,7 +3355,7 @@ function TeacherApp({
   const [ocrDraft, setOcrDraft] = useState<Record<string, string>>({});
   // Current flagged OCR reading (least certain first within each paper).
   const [flagId, setFlagId] = useState("khadija-q2");
-  const [byQuestion, setByQuestion] = useState<5 | 7>(5);
+  const [byQuestion, setByQuestion] = useState<number>(5);
   const tx = (en: string, de: string) => (language === "DE" ? de : en);
   const [otherFeedback, setOtherFeedback] = useState<Record<"Mariam" | "Salma", string>>({
     Mariam: "Show each step so your reasoning is clear.",
@@ -3031,7 +3366,7 @@ function TeacherApp({
     Mariam: otherFeedback.Mariam,
     Salma: otherFeedback.Salma,
   });
-  const score = awardedMark === null ? null : 14 + awardedMark;
+  const score = awardedMark === null ? null : marksTotal(roster[0], classState, 2) + awardedMark;
   const percent = score === null ? null : Math.round((score / 25) * 100);
   const reviewCount = 2 - otherReviewed.length + (awardedMark === null || dismissed ? 1 : 0);
   const selectedOcrVerified =
@@ -3266,9 +3601,29 @@ function TeacherApp({
         },
       });
       setOtherReviewed([...new Set([...otherReviewed, name])]);
-      setView("overview");
+      setStage("redflag");
     }
     setModal(false);
+  };
+  /** Learning-gap decision for Mariam or Salma (Khadija's is decideRedFlag). */
+  const decideGap = (name: string, decision: "confirmed" | "dismissed" | "postponed") => {
+    const before = classState.gapDecisions;
+    updateClassState((st) => ({ gapDecisions: { ...st.gapDecisions, [name]: decision } }));
+    const entry = logActivity("redflag", name, {
+      EN: decision === "confirmed" ? "Recurring mistake confirmed as a learning gap" : decision === "dismissed" ? "Recurring-mistake flag dismissed" : "Recurring-mistake flag postponed",
+      DE: decision === "confirmed" ? "Wiederkehrender Fehler als Lernlücke bestätigt" : decision === "dismissed" ? "Hinweis auf wiederkehrenden Fehler verworfen" : "Hinweis auf wiederkehrenden Fehler zurückgestellt",
+    });
+    notify({
+      message: tx(
+        decision === "confirmed" ? `${name}’s learning gap confirmed. Approve the practice below.` : decision === "dismissed" ? "Flag dismissed." : "Decision postponed.",
+        decision === "confirmed" ? `Lernlücke von ${name} bestätigt. Geben Sie unten die Übung frei.` : decision === "dismissed" ? "Hinweis verworfen." : "Entscheidung zurückgestellt.",
+      ),
+      actionLabel: "Undo",
+      onAction: () => {
+        updateClassState({ gapDecisions: before });
+        markActivityUndone(entry);
+      },
+    });
   };
   // Red-flag decision (confirm / dismiss / postpone) with Undo that restores decision, step and log.
   const decideRedFlag = (decision: "confirmed" | "dismissed" | "postponed") => {
@@ -3302,7 +3657,7 @@ function TeacherApp({
         markActivityUndone(entry);
       },
     });
-    if (decision === "confirmed") setStage("publish");
+    // Stay on this step: the practice for the confirmed gap is approved right below.
   };
   // Override: AI mark for the answer typed in the dialog; a different mark needs a reason.
   const overrideAi: number | null =
@@ -3317,7 +3672,67 @@ function TeacherApp({
           : overrideAnswer.trim() === "2/3 > 3/5"
             ? 3
             : 0;
-  const overrideNeedsReason = overrideAi !== null && overrideMark !== overrideAi;
+  // The question this review step is about; other questions can be overridden from the same dialog.
+  const focusQ = selectedStudent === "Khadija" ? 2 : otherQ.q;
+  const reviewRow = roster.find((r) => r.name === selectedStudent) ?? roster[0];
+  const otherQuestion = overrideQ !== focusQ;
+  const otherQuestionAi = answerOf(reviewRow, overrideQ, classState).ai;
+  const overrideNeedsReason = otherQuestion
+    ? overrideMark !== otherQuestionAi
+    : overrideAi !== null && overrideMark !== overrideAi;
+  const currentMarkFor = (n: number) =>
+    n === focusQ
+      ? selectedStudent === "Khadija"
+        ? (awardedMark ?? aiQ2)
+        : (otherTeacherMark ?? otherAi ?? 0)
+      : markOf(reviewRow, n, classState);
+  const answerFor = (n: number) =>
+    n === focusQ
+      ? selectedStudent === "Khadija"
+        ? studentAnswer
+        : otherAnswer
+      : answerOf(reviewRow, n, classState).answer;
+  const openOverride = (n: number) => {
+    setOverrideQ(n);
+    setOverrideAnswer(answerFor(n));
+    setOverrideMark(currentMarkFor(n));
+    setOverrideReason("");
+    setOverrideError(false);
+    setModal(true);
+  };
+  /** Override a question other than the one this review step is about. */
+  const saveQuestionMark = (n: number, mark: number, reason: string) => {
+    const name = selectedStudent;
+    const out = specOf(n).out;
+    const ai = answerOf(reviewRow, n, classState).ai;
+    const previous = markOf(reviewRow, n, classState);
+    const before = classState.markEdits;
+    updateClassState((st) => ({ markEdits: { ...st.markEdits, [`${name}:${n}`]: mark } }));
+    const why = reason.trim() ? { EN: ` · reason: ${reason.trim()}`, DE: ` · Grund: ${reason.trim()}` } : { EN: "", DE: "" };
+    const entry =
+      mark === ai
+        ? logActivity("mark", name, {
+            EN: `Quiz 4 · Q${n}: AI mark ${mark}/${out} confirmed`,
+            DE: `Quiz 4 · A${n}: KI-Bewertung ${mark}/${out} bestätigt`,
+          })
+        : logActivity("override", name, {
+            EN: `Quiz 4 · Q${n}: AI proposed ${ai}/${out}, teacher awarded ${mark}/${out}${why.EN}`,
+            DE: `Quiz 4 · A${n}: KI schlug ${ai}/${out} vor, Lehrerin vergab ${mark}/${out}${why.DE}`,
+          });
+    notify({
+      message: tx(
+        `${name}’s Q${n} changed from ${previous}/${out} to ${mark}/${out}.`,
+        `${name}: A${n} von ${previous}/${out} auf ${mark}/${out} geändert.`,
+      ),
+      actionLabel: "Undo",
+      onAction: () => {
+        updateClassState({ markEdits: before });
+        markActivityUndone(entry);
+      },
+    });
+    if (selectedStudent === "Khadija" && published) setPublished(false);
+    setModal(false);
+  };
   // First visit to a paper's marks (for this verified answer) shows the AI grading progress.
   const gradeKey = `${selectedStudent}|${selectedStudent === "Khadija" ? studentAnswer : otherAnswer}`;
   const doPublish = () => {
@@ -3427,7 +3842,7 @@ function TeacherApp({
           ? "Repeated error"
           : "Publish results";
   const workflowStages: ReviewStage[] =
-    selectedStudent === "Khadija" ? ["ocr", "grade", "redflag", "publish"] : ["ocr", "grade"];
+    selectedStudent === "Khadija" ? ["ocr", "grade", "redflag", "publish"] : ["ocr", "grade", "redflag"];
   const selectedExamLanguage = selectedStudent === "Khadija" ? examLanguage : "EN";
   const examLanguageLabel =
     selectedExamLanguage === "DE" ? "Exam language: Deutsch" : "Exam language: English";
@@ -4060,14 +4475,15 @@ function TeacherApp({
                           </b>
                         </div>
                       </div>
-                      {selectedStudent === "Khadija" && (
-                        <GradeBreakdown
-                          language={language}
-                          q2Mark={awardedMark ?? aiQ2}
-                          q2Confirmed={awardedMark !== null}
-                          answer={studentAnswer}
-                        />
-                      )}
+                      <GradeBreakdown
+                        language={language}
+                        student={selectedStudent}
+                        focusQ={focusQ}
+                        q2Mark={awardedMark ?? aiQ2}
+                        q2Confirmed={awardedMark !== null}
+                        answer={studentAnswer}
+                        onOverride={openOverride}
+                      />
                       <label className="feedback-field">
                         Feedback to student
                         <textarea
@@ -4108,7 +4524,7 @@ function TeacherApp({
                           type="button"
                           className="link-button compare-link"
                           onClick={() => {
-                            setByQuestion(otherQ.q as 5 | 7);
+                            setByQuestion(otherQ.q);
                             setView("byquestion");
                           }}
                         >
@@ -4134,18 +4550,7 @@ function TeacherApp({
                         <Button
                           icon="edit"
                           variant="secondary"
-                          onClick={() => {
-                            if (selectedStudent === "Khadija") {
-                              setOverrideAnswer(studentAnswer);
-                              setOverrideMark(awardedMark ?? aiQ2);
-                            } else {
-                              setOverrideAnswer(otherAnswer);
-                              setOverrideMark(otherTeacherMark ?? otherAi ?? 0);
-                            }
-                            setOverrideReason("");
-                            setOverrideError(false);
-                            setModal(true);
-                          }}
+                          onClick={() => openOverride(focusQ)}
                         >
                           Override
                         </Button>
@@ -4170,67 +4575,18 @@ function TeacherApp({
                 )}
 
                 {stage === "redflag" && (
-                  <section className="panel redflag-panel">
-                    <div className="ai-title">
-                      <span>
-                        <Icon name="flag" />
-                      </span>
-                      <div>
-                        <p className="kicker">REPEATED LEARNING GAP</p>
-                        <h2>
-                          Fraction-comparison error{" "}
-                          <HelpTip language={language} topic={tx("Red flag", "Warnhinweis")}>
-                            {tx(
-                              "The AI found the same mistake in several quizzes. If you confirm it, Khadija gets a short lesson and quiz, and her parent sees a learning alert if sharing is on.",
-                              "Die KI hat denselben Fehler in mehreren Quizzen gefunden. Wenn Sie bestätigen, bekommt Khadija eine kurze Lektion mit Quiz, und ihr Elternteil sieht einen Lernhinweis, wenn geteilt wird.",
-                            )}
-                          </HelpTip>
-                        </h2>
-                      </div>
-                    </div>
-                    <p>
-                      Khadija has made the same comparison error across three quizzes. Confirming
-                      creates a teacher-visible support flag.
-                    </p>
-                    <div className="evidence-timeline">
-                      <article>
-                        <span>Quiz 2</span>
-                        <strong>1/2 &lt; 1/3</strong>
-                        <small>Incorrect comparison</small>
-                      </article>
-                      <article>
-                        <span>Quiz 3</span>
-                        <strong>3/5 &gt; 3/4</strong>
-                        <small>Incorrect comparison</small>
-                      </article>
-                      <article>
-                        <span>Quiz 4</span>
-                        <strong>2/3 &lt; 3/5</strong>
-                        <small>Incorrect comparison</small>
-                      </article>
-                    </div>
-                    {redFlagDecision && (
-                      <Status type={redFlagDecision === "confirmed" ? "warn" : "neutral"}>
-                        {redFlagDecision === "confirmed"
-                          ? "Flag confirmed"
-                          : redFlagDecision === "dismissed"
-                            ? "Flag dismissed"
-                            : "Flag postponed"}
-                      </Status>
-                    )}
-                    <div className="decision-actions">
-                      <Button icon="check" onClick={() => decideRedFlag("confirmed")}>
-                        Confirm
-                      </Button>
-                      <Button icon="close" variant="secondary" onClick={() => decideRedFlag("dismissed")}>
-                        Dismiss
-                      </Button>
-                      <Button icon="clock" variant="ghost" onClick={() => decideRedFlag("postponed")}>
-                        Postpone
-                      </Button>
-                    </div>
-                    <ResourcesPanel language={language} />
-                  </section>
+                  <GapReview
+                    key={selectedStudent}
+                    student={selectedStudent}
+                    decision={selectedStudent === "Khadija" ? redFlagDecision : classState.gapDecisions[selectedStudent]}
+                    onDecide={(decision) =>
+                      selectedStudent === "Khadija" ? decideRedFlag(decision) : decideGap(selectedStudent, decision)
+                    }
+                    published={published}
+                    onDone={selectedStudent === "Khadija" ? () => setStage("publish") : () => setView("overview")}
+                    doneLabel={selectedStudent === "Khadija" ? tx("Continue to publish", "Weiter zum Veröffentlichen") : undefined}
+                    {...common}
+                  />
                 )}
 
                 {stage === "publish" && (
@@ -4389,7 +4745,7 @@ function TeacherApp({
 
             {view === "insights" && (
               <>
-                <ClassPerformance khadija={khadijaLive} language={language} onOpenStudent={openRecord} />
+                <ClassPerformance khadija={khadijaLive} language={language} onOpenStudent={openRecord} notify={common.notify} />
                 {classState.teacherClass === "4B" && <QuizMonitor khadija={khadijaLive} {...common} />}
               </>
             )}
@@ -4423,12 +4779,13 @@ function TeacherApp({
               <QuestionReview
                 key={byQuestion}
                 initialQuestion={byQuestion}
+                khadija={khadijaLive}
                 onOpenReview={(name) => openReview(name as ReviewStudent, "grade")}
                 {...common}
               />
             )}
             {view === "gradebook" && <Gradebook khadija={khadijaLive} {...common} />}
-            {view === "skilltree" && <SkillTree onOpenStudent={openRecord} {...common} />}
+            {view === "skilltree" && <SkillTree onOpenStudent={openRecord} khadija={khadijaLive} {...common} />}
             {view === "messages" && (
               <MessagesPage
                 onReview={() => openReview("Khadija", "grade")}
@@ -4497,24 +4854,57 @@ function TeacherApp({
                 <Icon name="edit" />
               </span>
               <p className="kicker">TEACHER OVERRIDE</p>
-              <h2>Enter the answer and mark</h2>
+              <h2>{tx(`Change a mark on ${selectedStudent}’s paper`, `Eine Bewertung in der Arbeit von ${selectedStudent} ändern`)}</h2>
               <p>This replaces the AI proposal and updates the total score.</p>
+              <label>
+                {tx("Question", "Aufgabe")}
+                <select
+                  value={overrideQ}
+                  autoFocus
+                  onChange={(e) => {
+                    const n = Number(e.target.value);
+                    setOverrideQ(n);
+                    setOverrideAnswer(answerFor(n));
+                    setOverrideMark(currentMarkFor(n));
+                    setOverrideError(false);
+                  }}
+                >
+                  {Array.from({ length: 8 }, (_, i) => {
+                    const n = i + 1;
+                    const spec = specOf(n);
+                    return (
+                      <option key={n} value={n}>
+                        {tx("Q", "A")}
+                        {n} · {spec.title[language]} · {tx("now", "jetzt")} {currentMarkFor(n)}/{spec.out}
+                        {n === focusQ ? ` (${tx("this review", "diese Prüfung")})` : ""}
+                      </option>
+                    );
+                  })}
+                </select>
+              </label>
               <label>
                 Student answer
                 <input
                   value={overrideAnswer}
                   onChange={(e) => setOverrideAnswer(e.target.value)}
-                  autoFocus
+                  readOnly={otherQuestion}
+                  aria-describedby={otherQuestion ? "override-answer-note" : undefined}
                 />
               </label>
+              {otherQuestion && (
+                <p className="override-note" id="override-answer-note">
+                  {tx("AI mark", "KI-Bewertung")} {otherQuestionAi}/{specOf(overrideQ).out}:{" "}
+                  {answerOf(reviewRow, overrideQ, classState).reason[language]}
+                </p>
+              )}
               <label>
                 Mark awarded
                 <select
                   value={overrideMark}
                   onChange={(e) => setOverrideMark(Number(e.target.value))}
                 >
-                  {Array.from({ length: (selectedStudent === "Khadija" ? 3 : otherQ.out) + 1 }, (_, i) => {
-                    const out = selectedStudent === "Khadija" ? 3 : otherQ.out;
+                  {Array.from({ length: specOf(overrideQ).out + 1 }, (_, i) => {
+                    const out = specOf(overrideQ).out;
                     return (
                       <option key={i} value={out - i}>
                         {out - i} / {out}
@@ -4540,8 +4930,8 @@ function TeacherApp({
               {overrideError && (
                 <ErrorNote>
                   {tx(
-                    `The reason is empty. Your mark (${overrideMark}) differs from the AI mark (${overrideAi}), so write a short reason, then press Save override.`,
-                    `Der Grund fehlt. Ihre Bewertung (${overrideMark}) weicht von der KI-Bewertung (${overrideAi}) ab. Schreiben Sie einen kurzen Grund und drücken Sie dann Änderung speichern.`,
+                    `The reason is empty. Your mark (${overrideMark}) differs from the AI mark (${otherQuestion ? otherQuestionAi : overrideAi}), so write a short reason, then press Save override.`,
+                    `Der Grund fehlt. Ihre Bewertung (${overrideMark}) weicht von der KI-Bewertung (${otherQuestion ? otherQuestionAi : overrideAi}) ab. Schreiben Sie einen kurzen Grund und drücken Sie dann Änderung speichern.`,
                   )}
                 </ErrorNote>
               )}
@@ -4559,7 +4949,8 @@ function TeacherApp({
                       setOverrideError(true);
                       return;
                     }
-                    confirmMark(overrideMark, overrideAnswer, overrideReason);
+                    if (otherQuestion) saveQuestionMark(overrideQ, overrideMark, overrideReason);
+                    else confirmMark(overrideMark, overrideAnswer, overrideReason);
                   }}
                 >
                   Save override
@@ -4678,7 +5069,7 @@ function ParentApp({
   const classState = useClassState();
   const visible = published && shareParent && awardedMark !== null;
   const quizStatus = published && !shareParent ? "Results not shared yet" : "Teacher checking";
-  const score = awardedMark === null ? null : 14 + awardedMark;
+  const score = awardedMark === null ? null : marksTotal(roster[0], classState, 2) + awardedMark;
   const percent = score === null ? null : Math.round((score / 25) * 100);
   const quiz: ParentQuiz = {
     visible,
@@ -4803,6 +5194,7 @@ function ParentApp({
                   </article>
 
                   <LearningAlert language={language} quiz={quiz} onHelp={() => setTab("resources")} />
+                  <ParentGapOverview language={language} quiz={quiz} compact />
 
                   <article className="parent-message card">
                     <span>
@@ -4868,6 +5260,7 @@ function ParentApp({
                       {visible && <span>Quiz 4</span>}
                     </div>
                   </article>
+                  <ParentGapOverview language={language} quiz={quiz} />
                   <ParentConcepts language={language} quiz={quiz} />
                   <PracticeStatus language={language} quiz={quiz} />
                 </>

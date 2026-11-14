@@ -98,7 +98,61 @@ export const khadijaConcepts: { name: Text; values: number[]; level: "good" | "n
 ];
 
 export type Resources = { video: boolean; printable: "worksheet" | "game" | "none" };
-export type SavedRule = { id: number; scope: Text; text: Text };
+
+/** A printable the AI can suggest for a learning gap; the first one per skill is the AI suggestion. */
+export type ResourceOption = { id: string; title: Text; detail: Text };
+export const printableOptions: Record<string, ResourceOption[]> = {
+  compare: [
+    { id: "worksheet", title: { EN: "Comparing fractions worksheet", DE: "Arbeitsblatt Brüche vergleichen" }, detail: { EN: "8 pairs to compare, with fraction strips at the top", DE: "8 Paare zum Vergleichen, oben mit Bruchstreifen" } },
+    { id: "game", title: { EN: "Fraction strips game", DE: "Bruchstreifen-Spiel" }, detail: { EN: "Cut out strips, build both fractions, compare", DE: "Streifen ausschneiden, beide Brüche legen, vergleichen" } },
+    { id: "numberline", title: { EN: "Number-line cards", DE: "Zahlenstrahl-Karten" }, detail: { EN: "Put 6 fractions on a 0–1 number line", DE: "6 Brüche auf einen Zahlenstrahl von 0 bis 1 legen" } },
+  ],
+  working: [
+    { id: "steps", title: { EN: "Show-your-working sheet", DE: "Arbeitsblatt „Rechenweg zeigen“" }, detail: { EN: "4 word problems with a box for the number sentence", DE: "4 Sachaufgaben mit einem Kasten für die Rechnung" } },
+    { id: "cards", title: { EN: "Step-by-step problem cards", DE: "Schritt-für-Schritt-Karten" }, detail: { EN: "Read · underline · write the sum · answer", DE: "Lesen · unterstreichen · Rechnung schreiben · antworten" } },
+    { id: "bar", title: { EN: "Bar-model practice", DE: "Übung mit Balkenmodell" }, detail: { EN: "Draw a bar model before writing the sum", DE: "Erst ein Balkenmodell zeichnen, dann rechnen" } },
+  ],
+  parts: [
+    { id: "fold", title: { EN: "Fold-and-shade strips", DE: "Falt- und Färbestreifen" }, detail: { EN: "Fold paper into equal parts and shade", DE: "Papier in gleiche Teile falten und färben" } },
+    { id: "grid", title: { EN: "Equal-parts grid sheet", DE: "Raster „Gleiche Teile“" }, detail: { EN: "Shade fractions of squares and circles", DE: "Brüche von Quadraten und Kreisen färben" } },
+  ],
+  default: [
+    { id: "sheet", title: { EN: "Practice sheet", DE: "Übungsblatt" }, detail: { EN: "6 short questions on this skill", DE: "6 kurze Aufgaben zu dieser Kompetenz" } },
+    { id: "game", title: { EN: "Partner game", DE: "Partnerspiel" }, detail: { EN: "A 10-minute game for two", DE: "Ein 10-Minuten-Spiel zu zweit" } },
+  ],
+};
+export const optionsFor = (skill: string) => printableOptions[skill] ?? printableOptions.default;
+
+/** Practice the teacher approves for one student's learning gap. */
+export type ResourcePlan = {
+  skill: string;
+  video: boolean;
+  /** Printable option id, or "none". */
+  printable: string;
+  /** Teacher's own wording for the lesson and the printable (modify). */
+  lessonNote: string;
+  printableNote: string;
+  /** suggested = AI draft · assigned = sent to the student · changed = edited after it was sent. */
+  status: "suggested" | "assigned" | "changed";
+};
+export const defaultPlan = (skill: string): ResourcePlan => ({
+  skill,
+  video: true,
+  printable: optionsFor(skill)[0].id,
+  lessonNote: "",
+  printableNote: "",
+  status: "suggested",
+});
+
+/** One verification pop quiz attempt, with the result before practice for the same skill. */
+export type PopQuizAttempt = { score: number; before: number; at: Text; round: number };
+export type SavedRule = {
+  id: number;
+  scope: Text;
+  text: Text;
+  /** Where the rule came from, when it was saved from a bulk correction. */
+  source?: { q: number; answer: string; mark: number; out: number };
+};
 export type SchemeItem = { n: number; marks: number; model: string; rule: Text };
 export type Assessment = {
   id: number;
@@ -185,6 +239,8 @@ export type RosterStudent = {
   practice: "none" | "pending" | "done";
   quizScore?: number;
   q5: { group: "working" | "noWorking" | "wrong" | "missing"; mark: number };
+  /** Class, when not Grade 4B. */
+  classId?: ClassId;
 };
 
 // Quiz 1–3 averages: 59, 64, 67 %; Quiz 4 average: 71 % (Khadija 68 %).
@@ -213,6 +269,49 @@ export const roster: RosterStudent[] = [
   { name: "Judy", quizzes: [46, 52, 58, null], focus: "working", practice: "none", q5: { group: "missing", mark: 0 } },
 ];
 
+/** Grade 4A and 4C students (summary data only: no Quiz 4 papers in this prototype). */
+function classRoster(
+  classId: "4A" | "4C",
+  names: string[],
+  averages: (number | null)[],
+  support: Record<string, string>,
+): RosterStudent[] {
+  return names.map((name, i) => {
+    // Spread results around the class average, the same way every time.
+    const shift = ((i * 7) % 9) - 4;
+    const gap = support[name] ? -10 : 0;
+    const at = (q: number) => {
+      const avg = averages[q];
+      return avg === null ? null : Math.max(30, Math.min(96, Math.round((avg + shift * 2 + gap) / 4) * 4));
+    };
+    return {
+      name,
+      classId,
+      quizzes: [at(0) ?? 0, at(1) ?? 0, at(2) ?? 0, at(3)],
+      focus: support[name] ?? null,
+      practice: "none",
+      q5: { group: "working", mark: 4 },
+    };
+  });
+}
+export const otherRosters: Record<"4A" | "4C", RosterStudent[]> = {
+  "4A": classRoster(
+    "4A",
+    ["Rahma", "Jomana", "Farah", "Amira", "Basma", "Dina", "Esraa", "Ghada", "Hagar", "Iman", "Jude", "Kenzy", "Lamia", "Maya", "Nadine", "Omnia", "Rawan", "Sama", "Tala", "Wafaa", "Yara", "Zeina", "Logy", "Nesma"],
+    [63, 66, 70, 74],
+    { Rahma: "words", Jomana: "words", Farah: "compare" },
+  ),
+  "4C": classRoster(
+    "4C",
+    ["Youssef", "Hamza", "Lojain", "Adam", "Ali", "Bassel", "Karim", "Malek", "Marwan", "Mostafa", "Omar", "Seif", "Tarek", "Yassin", "Ziad", "Hassan", "Ibrahim", "Khaled", "Mazen", "Nabil", "Rami", "Sherif", "Taha"],
+    [55, 57, 62, null],
+    { Youssef: "multi", Hamza: "parts", Lojain: "multi" },
+  ),
+};
+/** Every student the teacher teaches, Grade 4B first. */
+export const allStudents: RosterStudent[] = [...roster, ...otherRosters["4A"], ...otherRosters["4C"]];
+export const classOf = (student: RosterStudent): ClassId => student.classId ?? "4B";
+
 export const initialScheme: SchemeItem[] = [
   { n: 1, marks: 2, model: "144", rule: { EN: "Answer only", DE: "Nur Ergebnis" } },
   { n: 2, marks: 3, model: "528", rule: { EN: "1 for method, 2 for answer", DE: "1 für den Rechenweg, 2 für das Ergebnis" } },
@@ -230,11 +329,19 @@ type ClassState = {
   otherReviewed: string[];
   verifiedStudents: string[];
   ocrValues: Record<string, string>;
-  q5RuleApplied: boolean;
+  /** Bulk corrections the teacher approved (review by question). */
+  bulkRules: BulkRule[];
   savedRules: SavedRule[];
   scheme: SchemeItem[];
   mistakeTags: Record<number, string>;
-  revisionPlan: string[];
+  /** Revision lesson plan per class: skill ids in teaching order. */
+  revisionPlans: Record<ClassId, string[]>;
+  /** Resources the teacher approved per student (C30). */
+  resourcePlans: Record<string, ResourcePlan>;
+  /** Learning-gap decision per student after marking (Khadija's lives in the review itself). */
+  gapDecisions: Record<string, "confirmed" | "dismissed" | "postponed">;
+  /** Every pop quiz attempt per student, so improvement is kept (C31). */
+  popQuizzes: Record<string, PopQuizAttempt[]>;
   bulkUploaded: boolean;
   remindersSent: string[];
   assessments: Assessment[];
@@ -250,6 +357,10 @@ type ClassState = {
   teacherClass: ClassId;
   /** Students whose Quiz 4 paper the teacher uploaded in bulk (this session). */
   uploadedScans: string[];
+  /** Files the teacher uploaded in bulk, per student, so the original scan can be opened later. */
+  scanFiles: Record<string, { name: string; url: string | null }[]>;
+  /** Pages a student sent from the app (their own photos), per student. */
+  studentScans: Record<string, { name: string; url: string | null }[]>;
   /** Follow-up after the verification pop quiz, per student. */
   gapOutcome: Record<string, GapOutcome>;
 };
@@ -278,7 +389,7 @@ let state: ClassState = {
   otherReviewed: [],
   verifiedStudents: [],
   ocrValues: {},
-  q5RuleApplied: false,
+  bulkRules: [],
   savedRules: [
     {
       id: 1,
@@ -291,7 +402,18 @@ let state: ClassState = {
   ],
   scheme: initialScheme,
   mistakeTags: { 3: "parts", 5: "working", 7: "denominator" },
-  revisionPlan: [],
+  revisionPlans: { "4A": [], "4B": [], "4C": [] },
+  resourcePlans: {},
+  gapDecisions: {},
+  popQuizzes: {
+    Mariam: [{ score: 3, before: 50, round: 1, at: { EN: "Monday", DE: "Montag" } }],
+    Laila: [
+      { score: 1, before: 33, round: 1, at: { EN: "Last week", DE: "Letzte Woche" } },
+      { score: 2, before: 33, round: 2, at: { EN: "Monday", DE: "Montag" } },
+    ],
+    Nour: [{ score: 3, before: 33, round: 1, at: { EN: "Tuesday", DE: "Dienstag" } }],
+    Hana: [{ score: 1, before: 0, round: 1, at: { EN: "Tuesday", DE: "Dienstag" } }],
+  },
   bulkUploaded: false,
   remindersSent: [],
   assessments: [
@@ -307,6 +429,8 @@ let state: ClassState = {
   rejected: [],
   teacherClass: "4B",
   uploadedScans: [],
+  scanFiles: {},
+  studentScans: {},
   gapOutcome: {},
 };
 const listeners = new Set<() => void>();
@@ -330,26 +454,233 @@ export function useClassState() {
   );
 }
 
-/** AI mark for Q7 (compare 2/3 and 3/5, 3 marks): students working on comparing fractions wrote "<". */
-export const q7AiMark = (student: RosterStudent) =>
-  student.q5.group === "missing" ? 0 : student.focus === "compare" ? 0 : 3;
+// ---------------------------------------------------------------------------
+// Quiz 4 answers and AI marks for every question and every student.
+// Each AI mark comes with the criteria it was based on (AI grading explanation).
+// ---------------------------------------------------------------------------
+export type Criterion = { text: Text; marks: number; met: boolean };
+export type AnswerVariant = {
+  answer: string;
+  /** AI-suggested mark. */
+  ai: number;
+  confidence: number;
+  criteria: Criterion[];
+  /** One-sentence reason the AI gives for the mark. */
+  reason: Text;
+};
+export type QuestionSpec = {
+  n: number;
+  out: number;
+  title: Text;
+  model: string;
+  variants: Record<string, AnswerVariant>;
+};
 
-/** Current Q5 mark: teacher edit, else approved bulk rule, else AI mark. */
-export function q5MarkOf(student: RosterStudent, s: ClassState = state): number {
-  const edit = s.markEdits[`${student.name}:5`];
+const c = (en: string, de: string, marks: number, met: boolean): Criterion => ({ text: { EN: en, DE: de }, marks, met });
+const why = (en: string, de: string): Text => ({ EN: en, DE: de });
+
+export const quiz4Spec: QuestionSpec[] = [
+  {
+    n: 1,
+    out: 2,
+    title: { EN: "24 × 6", DE: "24 × 6" },
+    model: "144",
+    variants: {
+      full: { answer: "144", ai: 2, confidence: 96, criteria: [c("Answer 144 matches the model answer", "Ergebnis 144 entspricht der Musterlösung", 2, true)], reason: why("Correct answer; this question gives marks for the answer only.", "Richtiges Ergebnis; hier zählt nur das Ergebnis.") },
+      none: { answer: "124", ai: 0, confidence: 92, criteria: [c("Answer matches 144", "Ergebnis entspricht 144", 2, false)], reason: why("124 does not match 144, and this question has no method marks.", "124 entspricht nicht 144, und es gibt keine Punkte für den Rechenweg.") },
+    },
+  },
+  {
+    n: 2,
+    out: 3,
+    title: { EN: "132 × 4", DE: "132 × 4" },
+    model: "528",
+    variants: {
+      full: { answer: "528", ai: 3, confidence: 61, criteria: [c("Method: 132 × 4 set out correctly", "Rechenweg: 132 × 4 richtig angesetzt", 1, true), c("Answer 528 matches the model answer", "Ergebnis 528 entspricht der Musterlösung", 2, true)], reason: why("Method and answer are both correct.", "Rechenweg und Ergebnis sind richtig.") },
+      none: { answer: "578", ai: 0, confidence: 88, criteria: [c("Method: 132 × 4 set out correctly", "Rechenweg: 132 × 4 richtig angesetzt", 1, false), c("Answer matches 528", "Ergebnis entspricht 528", 2, false)], reason: why("Wrong answer; the method mark needs a correct answer.", "Falsches Ergebnis; der Rechenwegpunkt setzt ein richtiges Ergebnis voraus.") },
+    },
+  },
+  {
+    n: 3,
+    out: 3,
+    title: { EN: "Shade 3/4", DE: "Färbe 3/4" },
+    model: "3 of 4 equal parts shaded",
+    variants: {
+      full: { answer: "3/4 shaded", ai: 3, confidence: 93, criteria: [c("Shape split into 4 equal parts", "Form in 4 gleiche Teile geteilt", 1, true), c("Exactly 3 parts shaded", "Genau 3 Teile gefärbt", 2, true)], reason: why("3 of 4 equal parts are shaded.", "3 von 4 gleichen Teilen sind gefärbt.") },
+      zero: { answer: "2/4 shaded", ai: 0, confidence: 89, criteria: [c("Shape split into 4 equal parts", "Form in 4 gleiche Teile geteilt", 1, false), c("Exactly 3 parts shaded", "Genau 3 Teile gefärbt", 2, false)], reason: why("Only 2 parts are shaded, so the AI marked the whole drawing as wrong.", "Nur 2 Teile sind gefärbt; die KI hat die ganze Zeichnung als falsch bewertet.") },
+      one: { answer: "2/4 shaded", ai: 1, confidence: 71, criteria: [c("Shape split into 4 equal parts", "Form in 4 gleiche Teile geteilt", 1, true), c("Exactly 3 parts shaded", "Genau 3 Teile gefärbt", 2, false)], reason: why("The equal parts are right, but only 2 parts are shaded.", "Die gleichen Teile stimmen, aber nur 2 Teile sind gefärbt.") },
+    },
+  },
+  {
+    n: 4,
+    out: 3,
+    title: { EN: "1/2 + 1/4", DE: "1/2 + 1/4" },
+    model: "3/4",
+    variants: {
+      full: { answer: "3/4", ai: 3, confidence: 94, criteria: [c("Common denominator (quarters) used", "Gemeinsamer Nenner (Viertel) genutzt", 1, true), c("Answer 3/4", "Ergebnis 3/4", 2, true)], reason: why("Common denominator and answer are correct.", "Gemeinsamer Nenner und Ergebnis sind richtig.") },
+      one: { answer: "2/4 + 1/4 = 2/4", ai: 1, confidence: 84, criteria: [c("Common denominator (quarters) used", "Gemeinsamer Nenner (Viertel) genutzt", 1, true), c("Answer 3/4", "Ergebnis 3/4", 2, false)], reason: why("The common denominator is right, but the sum is wrong.", "Der gemeinsame Nenner stimmt, aber die Summe ist falsch.") },
+      none: { answer: "2/6", ai: 0, confidence: 90, criteria: [c("Common denominator (quarters) used", "Gemeinsamer Nenner (Viertel) genutzt", 1, false), c("Answer 3/4", "Ergebnis 3/4", 2, false)], reason: why("Tops and bottoms were added; no common denominator.", "Zähler und Nenner wurden addiert; kein gemeinsamer Nenner.") },
+    },
+  },
+  {
+    n: 5,
+    out: 4,
+    title: { EN: "Share 20 apples", DE: "Teile 20 Äpfel" },
+    model: "20 ÷ 5 = 4 apples each",
+    variants: {
+      working: { answer: "20 ÷ 5 = 4 each", ai: 4, confidence: 92, criteria: [c("Working shown (20 ÷ 5)", "Rechenweg gezeigt (20 ÷ 5)", 2, true), c("Answer 4 each", "Ergebnis je 4", 2, true)], reason: why("Working and answer are both correct.", "Rechenweg und Ergebnis sind richtig.") },
+      noWorking: { answer: "4 each", ai: 2, confidence: 74, criteria: [c("Working shown (20 ÷ 5)", "Rechenweg gezeigt (20 ÷ 5)", 2, false), c("Answer 4 each", "Ergebnis je 4", 2, true)], reason: why("The answer is right, but no working is shown: 2 of 4 marks for the answer.", "Das Ergebnis stimmt, aber der Rechenweg fehlt: 2 von 4 Punkten für das Ergebnis.") },
+      noWorkingLow: { answer: "4 each", ai: 1, confidence: 66, criteria: [c("Working shown (20 ÷ 5)", "Rechenweg gezeigt (20 ÷ 5)", 2, false), c("Answer 4 each, with unit", "Ergebnis je 4, mit Einheit", 2, false)], reason: why("No working, and the AI also took 1 mark off because the unit (apples) is missing.", "Kein Rechenweg, und die KI hat 1 Punkt abgezogen, weil die Einheit (Äpfel) fehlt.") },
+      wrong: { answer: "5 each", ai: 0, confidence: 90, criteria: [c("Working shown (20 ÷ 5)", "Rechenweg gezeigt (20 ÷ 5)", 2, false), c("Answer 4 each", "Ergebnis je 4", 2, false)], reason: why("Wrong answer and no working.", "Falsches Ergebnis und kein Rechenweg.") },
+    },
+  },
+  {
+    n: 6,
+    out: 3,
+    title: { EN: "450 ÷ 5", DE: "450 ÷ 5" },
+    model: "90",
+    variants: {
+      full: { answer: "450 ÷ 5 = 90", ai: 3, confidence: 97, criteria: [c("Method shown", "Rechenweg gezeigt", 1, true), c("Answer 90", "Ergebnis 90", 2, true)], reason: why("Method and answer are correct.", "Rechenweg und Ergebnis sind richtig.") },
+      answerOnly: { answer: "90", ai: 2, confidence: 86, criteria: [c("Method shown", "Rechenweg gezeigt", 1, false), c("Answer 90", "Ergebnis 90", 2, true)], reason: why("Correct answer without a method: 2 of 3 marks.", "Richtiges Ergebnis ohne Rechenweg: 2 von 3 Punkten.") },
+      none: { answer: "80", ai: 0, confidence: 91, criteria: [c("Method shown", "Rechenweg gezeigt", 1, false), c("Answer 90", "Ergebnis 90", 2, false)], reason: why("Wrong answer; no method shown.", "Falsches Ergebnis; kein Rechenweg.") },
+    },
+  },
+  {
+    n: 7,
+    out: 3,
+    title: { EN: "Compare 2/3 and 3/5", DE: "Vergleiche 2/3 und 3/5" },
+    model: "2/3 > 3/5",
+    variants: {
+      right: { answer: "2/3 > 3/5", ai: 3, confidence: 91, criteria: [c("Equal denominators (10/15 and 9/15)", "Gleiche Nenner (10/15 und 9/15)", 1, true), c("Correct sign >", "Richtiges Zeichen >", 2, true)], reason: why("The comparison matches the model answer.", "Der Vergleich entspricht der Musterlösung.") },
+      wrong: { answer: "2/3 < 3/5", ai: 0, confidence: 91, criteria: [c("Equal denominators (10/15 and 9/15)", "Gleiche Nenner (10/15 und 9/15)", 1, false), c("Correct sign >", "Richtiges Zeichen >", 2, false)], reason: why("Wrong sign, and no equal denominators were used.", "Falsches Zeichen, und es wurden keine gleichen Nenner genutzt.") },
+      wrongPartial: { answer: "2/3 < 3/5", ai: 1, confidence: 63, criteria: [c("Equal denominators (10/15 and 9/15)", "Gleiche Nenner (10/15 und 9/15)", 1, true), c("Correct sign >", "Richtiges Zeichen >", 2, false)], reason: why("The AI saw 10/15 and 9/15 in the margin and gave 1 mark, but the sign is wrong.", "Die KI hat 10/15 und 9/15 am Rand gesehen und 1 Punkt gegeben, aber das Zeichen ist falsch.") },
+      unread: { answer: "?", ai: 0, confidence: 52, criteria: [c("Answer could be read", "Antwort lesbar", 3, false)], reason: why("The answer could not be read. Check the extracted text first.", "Die Antwort war nicht lesbar. Prüfen Sie zuerst den erkannten Text.") },
+    },
+  },
+  {
+    n: 8,
+    out: 4,
+    title: { EN: "Bus seats word problem", DE: "Sachaufgabe mit Bussitzen" },
+    model: "12 × 4 = 48 seats",
+    variants: {
+      full: { answer: "12 × 4 = 48 seats", ai: 4, confidence: 95, criteria: [c("Working shown (12 × 4)", "Rechenweg gezeigt (12 × 4)", 2, true), c("Answer 48 seats", "Ergebnis 48 Sitze", 2, true)], reason: why("Working, answer and unit are correct.", "Rechenweg, Ergebnis und Einheit sind richtig.") },
+      noUnit: { answer: "12 × 4 = 48", ai: 3, confidence: 83, criteria: [c("Working shown (12 × 4)", "Rechenweg gezeigt (12 × 4)", 2, true), c("Answer 48 seats, with unit", "Ergebnis 48 Sitze, mit Einheit", 2, false)], reason: why("Saved rule “Correct unit missing: take away 1 mark” was used.", "Gespeicherte Regel „Fehlende Einheit: 1 Punkt abziehen“ wurde angewendet.") },
+      workingOnly: { answer: "12 × 4 = 46", ai: 2, confidence: 87, criteria: [c("Working shown (12 × 4)", "Rechenweg gezeigt (12 × 4)", 2, true), c("Answer 48 seats", "Ergebnis 48 Sitze", 2, false)], reason: why("Right working, but a slip in the answer.", "Richtiger Rechenweg, aber ein Fehler im Ergebnis.") },
+      none: { answer: "40", ai: 0, confidence: 90, criteria: [c("Working shown (12 × 4)", "Rechenweg gezeigt (12 × 4)", 2, false), c("Answer 48 seats", "Ergebnis 48 Sitze", 2, false)], reason: why("Wrong answer; no working.", "Falsches Ergebnis; kein Rechenweg.") },
+    },
+  },
+];
+export const specOf = (n: number) => quiz4Spec[n - 1];
+
+/** Questions not tied to a learning gap; their marks are spread so each total matches the student's Quiz 4 result. */
+const ladders: Record<number, string[]> = {
+  1: ["full", "none"],
+  2: ["full", "none"],
+  4: ["full", "one", "none"],
+  6: ["full", "answerOnly", "none"],
+  8: ["full", "noUnit", "workingOnly", "none"],
+};
+const ladderQs = [8, 6, 4, 2, 1];
+/** Every way to choose a variant for the ladder questions, with how many marks it takes off. */
+type Combo = { pick: Record<number, string>; off: number; changed: number; most: number };
+const ladderCombos: Combo[] = (() => {
+  let combos: Combo[] = [{ pick: {}, off: 0, changed: 0, most: 0 }];
+  ladderQs.forEach((n) => {
+    const spec = specOf(n);
+    combos = combos.flatMap((combo) =>
+      ladders[n].map((id) => ({
+        pick: { ...combo.pick, [n]: id },
+        off: combo.off + spec.out - spec.variants[id].ai,
+        changed: combo.changed + (id === "full" ? 0 : 1),
+        most: Math.max(combo.most, spec.out - spec.variants[id].ai),
+      })),
+    );
+  });
+  return combos;
+})();
+
+const q3Variant: Record<string, string> = { Khadija: "zero", Salma: "zero", Hana: "one", Rana: "one" };
+const q5Variant = (student: RosterStudent) =>
+  student.q5.group === "working"
+    ? "working"
+    : student.q5.group === "wrong"
+      ? "wrong"
+      : student.q5.mark < 2
+        ? "noWorkingLow"
+        : "noWorking";
+const q7Variant = (student: RosterStudent, s: ClassState) => {
+  if (student.name === "Salma") {
+    const read = s.ocrValues.Salma;
+    return read === undefined || read === "?" ? "unread" : read === "2/3 > 3/5" ? "right" : "wrong";
+  }
+  if (student.name === "Aya") return "wrongPartial";
+  return student.focus === "compare" ? "wrong" : "right";
+};
+
+export type StudentAnswer = AnswerVariant & { n: number; out: number; variant: string };
+
+/** All 8 Quiz 4 answers of a 4B student, with the AI mark and its explanation. */
+export function quiz4Answers(student: RosterStudent, s: ClassState = state): StudentAnswer[] {
+  const fixed: Record<number, string> = {
+    3: q3Variant[student.name] ?? "full",
+    5: q5Variant(student),
+    7: q7Variant(student, s),
+  };
+  // Spread marks against the reading before OCR checks (Salma's Q7 was unreadable), so a corrected
+  // reading changes only that question.
+  const baseline: Record<number, string> = { ...fixed, 7: student.name === "Salma" ? "unread" : fixed[7] };
+  const fixedMarks = [3, 5, 7].reduce((sum, n) => sum + specOf(n).variants[baseline[n]].ai, 0);
+  const target = Math.round((student.quizzes[3] ?? 60) / 4);
+  const off = 15 - (target - fixedMarks);
+  const options = ladderCombos
+    .filter((combo) => combo.off === off)
+    // Prefer small partial deductions over whole questions at 0, then as few changed questions as possible.
+    .sort((a, b) => a.most - b.most || a.changed - b.changed);
+  const fewest = options.filter((combo) => combo.most === options[0]?.most && combo.changed === options[0]?.changed);
+  const index = roster.findIndex((r) => r.name === student.name);
+  const pick = fewest.length ? fewest[Math.max(0, index) % fewest.length].pick : { 1: "full", 2: "full", 4: "full", 6: "full", 8: "full" };
+  const variants: Record<number, string> = { ...pick, ...fixed };
+  return quiz4Spec.map((spec) => ({
+    ...spec.variants[variants[spec.n]],
+    n: spec.n,
+    out: spec.out,
+    variant: variants[spec.n],
+  }));
+}
+export const answerOf = (student: RosterStudent, n: number, s: ClassState = state) => quiz4Answers(student, s)[n - 1];
+
+/** A bulk correction the teacher approved: one answer to one question gets one mark. */
+export type BulkRule = { id: number; q: number; answer: string; mark: number; names: string[]; text: Text; savedRuleId: number | null };
+
+/** Current mark: teacher edit, else approved bulk correction, else AI mark. */
+export function markOf(student: RosterStudent, n: number, s: ClassState = state): number {
+  const edit = s.markEdits[`${student.name}:${n}`];
   if (edit !== undefined) return edit;
-  return s.q5RuleApplied && student.q5.group === "noWorking" ? Math.max(2, student.q5.mark) : student.q5.mark;
+  const rule = s.bulkRules.find((r) => r.q === n && r.names.includes(student.name));
+  if (rule) return rule.mark;
+  return answerOf(student, n, s).ai;
 }
-/** Current Q7 mark: teacher edit, else AI mark. */
-export function q7MarkOf(student: RosterStudent, s: ClassState = state): number {
-  return s.markEdits[`${student.name}:7`] ?? q7AiMark(student);
+/** Where the current mark comes from. */
+export function markSource(student: RosterStudent, n: number, s: ClassState = state): "teacher" | "rule" | "ai" {
+  if (s.markEdits[`${student.name}:${n}`] !== undefined) return "teacher";
+  return s.bulkRules.some((r) => r.q === n && r.names.includes(student.name)) ? "rule" : "ai";
+}
+/** Sum of the current marks (optionally leaving one question out). */
+export function marksTotal(student: RosterStudent, s: ClassState = state, skip?: number): number {
+  return quiz4Spec.reduce((sum, spec) => (spec.n === skip ? sum : sum + markOf(student, spec.n, s)), 0);
 }
 
-/** Quiz 4 percentage for a roster student, after bulk corrections and teacher edits (1 mark = 4 %). */
+/** AI mark for Q7 (compare 2/3 and 3/5, 3 marks). */
+export const q7AiMark = (student: RosterStudent) => answerOf(student, 7).ai;
+export const q5MarkOf = (student: RosterStudent, s: ClassState = state) => markOf(student, 5, s);
+export const q7MarkOf = (student: RosterStudent, s: ClassState = state) => markOf(student, 7, s);
+
+/** Quiz 4 percentage for a roster student, after bulk corrections and teacher edits (25 marks, 1 mark = 4 %). */
 export function quiz4Percent(student: RosterStudent, s: ClassState = state): number | null {
   const base = student.quizzes[3];
   if (base === null) return null;
-  return base + (q5MarkOf(student, s) - student.q5.mark) * 4 + (q7MarkOf(student, s) - q7AiMark(student)) * 4;
+  if (student.classId && student.classId !== "4B") return base;
+  return marksTotal(student, s) * 4;
 }
 
 // ---------------------------------------------------------------------------

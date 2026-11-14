@@ -7,16 +7,27 @@ import { analyzePage, type PageQuality } from "./student-media";
 import { Button, Icon, Status } from "./ui";
 import {
   addThreadMessage,
+  defaultPlan,
   flaggedReadings,
+  optionsFor,
   newId,
   ocrSuggestions,
   otherClasses,
   questionTitlesDe,
   questions,
+  answerOf,
+  markOf,
+  markSource,
   q5MarkOf,
   q7MarkOf,
+  quiz4Answers,
   quiz4Percent,
+  quiz4Spec,
+  allStudents,
+  classOf,
+  otherRosters,
   roster,
+  specOf,
   updateClassState,
   useClassState,
   type AssessmentQuestion,
@@ -26,6 +37,7 @@ import {
   type GapOutcome,
   type Lang,
   type Notifier,
+  type ResourcePlan,
   type RosterStudent,
   type Text,
   type Thread,
@@ -101,32 +113,62 @@ const studentsFor = (skillId: string) => flagged[skillId] ?? [];
 // ---------------------------------------------------------------------------
 // Notes to students (C32) – shared by roster, records, attention list
 // ---------------------------------------------------------------------------
+/** Only Khadija has a demo student account; other students' notes are kept in Messages. */
+export const DEMO_STUDENT = "Khadija";
+
 export function sendTeacherNote(
   student: string,
   text: string,
   { addNotification, notify, language }: Common,
+  options: { recommendation?: Text; demoCopy?: boolean } = {},
 ) {
   const t = makeT(language);
+  const { recommendation, demoCopy = false } = options;
+  const message = recommendation ? `${text}\n${t("Recommended practice", "Empfohlene Übung")}: ${recommendation[language]}` : text;
+  const title = recommendation
+    ? { EN: "Learning recommendation from Ms. Ashraf", DE: "Lernempfehlung von Frau Ashraf" }
+    : { EN: "Note from Ms. Ashraf", DE: "Notiz von Frau Ashraf" };
   const thread: Thread = {
     id: newId(),
     student,
     kind: "note",
-    title: { EN: "Note from Ms. Ashraf", DE: "Notiz von Frau Ashraf" },
-    messages: [{ from: "teacher", text, at: Date.now() }],
+    title,
+    messages: [{ from: "teacher", text: message, at: Date.now() }],
     status: "answered",
   };
-  updateClassState((s) => ({ threads: [thread, ...s.threads] }));
-  logActivity("feedback", student, { EN: `Note sent: “${text}”`, DE: `Notiz gesendet: „${text}“` });
-  if (student === "Khadija") {
+  // A copy in the demo student's inbox shows how the student receives it.
+  const copy: Thread | null =
+    demoCopy && student !== DEMO_STUDENT
+      ? {
+          id: newId(),
+          student: DEMO_STUDENT,
+          kind: "note",
+          title: { EN: `${title.EN} (demo copy of the note to ${student})`, DE: `${title.DE} (Demo-Kopie der Notiz an ${student})` },
+          messages: [{ from: "teacher", text: message, at: Date.now() }],
+          status: "answered",
+        }
+      : null;
+  updateClassState((s) => ({ threads: [...(copy ? [copy] : []), thread, ...s.threads] }));
+  logActivity("feedback", student, {
+    EN: `${recommendation ? "Learning recommendation" : "Note"} sent: “${text}”${recommendation ? ` (${recommendation.EN})` : ""}`,
+    DE: `${recommendation ? "Lernempfehlung" : "Notiz"} gesendet: „${text}“${recommendation ? ` (${recommendation.DE})` : ""}`,
+  });
+  if (student === DEMO_STUDENT || copy) {
     addNotification(
       "student",
-      { EN: "New note from Ms. Ashraf", DE: "Neue Notiz von Frau Ashraf" },
-      { EN: text, DE: text },
+      recommendation
+        ? { EN: "Ms. Ashraf recommends some practice", DE: "Frau Ashraf empfiehlt dir eine Übung" }
+        : { EN: "New note from Ms. Ashraf", DE: "Neue Notiz von Frau Ashraf" },
+      { EN: message, DE: message },
       { EN: "Read note", DE: "Notiz lesen" },
       "messages",
     );
   }
-  notify(t(`Note sent to ${student}.`, `Notiz an ${student} gesendet.`));
+  notify(
+    copy
+      ? t(`Note sent to ${student}. A copy is in the demo student’s inbox.`, `Notiz an ${student} gesendet. Eine Kopie ist im Postfach des Demo-Kindes.`)
+      : t(`Note sent to ${student}.`, `Notiz an ${student} gesendet.`),
+  );
 }
 
 export function sendPracticeReminder(student: string, { addNotification, notify, language }: Common) {
@@ -154,27 +196,100 @@ export function NoteComposer({
   ...common
 }: Common & { student: string; onClose: () => void }) {
   const t = makeT(common.language);
+  const language = common.language;
   useEscape(true, onClose);
-  const templates = [
-    t("Great effort this week – keep going!", "Toller Einsatz diese Woche – weiter so!"),
-    t(
-      "Please try the fraction lesson and quiz before Monday.",
-      "Bitte mach die Bruch-Lektion und das Quiz vor Montag.",
-    ),
-    t("Come and see me for 5 minutes at break.", "Komm in der Pause für 5 Minuten zu mir."),
-  ];
+  const [recipient, setRecipient] = useState(student || DEMO_STUDENT);
+  const [kind, setKind] = useState<"comment" | "recommendation">("comment");
   const [text, setText] = useState("");
+  const recipientRow = allStudents.find((r) => r.name === recipient);
+  const focus = recipientRow?.focus ?? null;
+  const focusName = skills.find((k) => k.id === focus)?.name;
+  // Recommendations: the mini lesson for the student's gap, or one of the printables for it.
+  const recommendations: { id: string; title: Text }[] = [
+    {
+      id: "lesson",
+      title: focusName
+        ? { EN: `Mini lesson + pop quiz: ${focusName.EN}`, DE: `Mini-Lektion + Kurz-Quiz: ${focusName.DE}` }
+        : { EN: "Mini lesson + pop quiz", DE: "Mini-Lektion + Kurz-Quiz" },
+    },
+    ...optionsFor(focus ?? "default").map((o) => ({ id: o.id, title: o.title })),
+  ];
+  const [recommendation, setRecommendation] = useState("lesson");
+  const chosen = recommendations.find((r) => r.id === recommendation) ?? recommendations[0];
+  const templates =
+    kind === "recommendation"
+      ? [
+          t("This will help with the mistake from the last quiz.", "Das hilft bei dem Fehler aus dem letzten Quiz."),
+          t("Please try this before our next lesson.", "Bitte probiere das vor unserer nächsten Stunde."),
+        ]
+      : [
+          t("Great effort this week – keep going!", "Toller Einsatz diese Woche – weiter so!"),
+          t("Please try the fraction lesson and quiz before Monday.", "Bitte mach die Bruch-Lektion und das Quiz vor Montag."),
+          t("Come and see me for 5 minutes at break.", "Komm in der Pause für 5 Minuten zu mir."),
+        ];
+  const groups: { label: string; names: string[] }[] = [
+    { label: t("Grade 4B", "Klasse 4B"), names: roster.map((r) => r.name) },
+    { label: t("Grade 4A", "Klasse 4A"), names: otherRosters["4A"].map((r) => r.name) },
+    { label: t("Grade 4C", "Klasse 4C"), names: otherRosters["4C"].map((r) => r.name) },
+  ];
+  const send = (demoCopy: boolean) => {
+    sendTeacherNote(recipient, text.trim(), common, {
+      recommendation: kind === "recommendation" ? chosen.title : undefined,
+      demoCopy,
+    });
+    onClose();
+  };
   return (
     <div className="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="note-title">
-      <div className="modal">
+      <div className="modal note-modal">
         <button className="modal-close" onClick={onClose} aria-label={t("Close", "Schließen")} title={t("Close", "Schließen")}>
           <Icon name="close" />
         </button>
         <span className="modal-icon">
           <Icon name="message" />
         </span>
-        <p className="kicker">{t("NOTE TO STUDENT", "NOTIZ AN DAS KIND")}</p>
-        <h2 id="note-title">{t(`Send a note to ${student}`, `Notiz an ${student} senden`)}</h2>
+        <p className="kicker">{t("MESSAGE TO A STUDENT", "NACHRICHT AN EIN KIND")}</p>
+        <h2 id="note-title">{t(`Send a note to ${recipient}`, `Notiz an ${recipient} senden`)}</h2>
+        <label>
+          {t("To", "An")}
+          <select value={recipient} onChange={(e) => setRecipient(e.target.value)}>
+            {groups.map((g) => (
+              <optgroup key={g.label} label={g.label}>
+                {g.names.map((name) => (
+                  <option key={name} value={name}>
+                    {name}
+                    {name === DEMO_STUDENT ? ` (${t("demo account", "Demo-Konto")})` : ""}
+                  </option>
+                ))}
+              </optgroup>
+            ))}
+          </select>
+        </label>
+        <fieldset className="note-kind">
+          <legend>{t("Type", "Art")}</legend>
+          <label className={kind === "comment" ? "selected" : ""}>
+            <input type="radio" name="note-kind" checked={kind === "comment"} onChange={() => setKind("comment")} />
+            {t("Comment", "Kommentar")}
+          </label>
+          <label className={kind === "recommendation" ? "selected" : ""}>
+            <input type="radio" name="note-kind" checked={kind === "recommendation"} onChange={() => setKind("recommendation")} />
+            {t("Learning recommendation", "Lernempfehlung")}
+          </label>
+        </fieldset>
+        {kind === "recommendation" && (
+          <label>
+            {focusName
+              ? t(`Recommend (for ${focusName.EN})`, `Empfehlen (für ${focusName.DE})`)
+              : t("Recommend", "Empfehlen")}
+            <select value={recommendation} onChange={(e) => setRecommendation(e.target.value)}>
+              {recommendations.map((r) => (
+                <option key={r.id} value={r.id}>
+                  {r.title[language]}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
         <div className="template-chips">
           {templates.map((item) => (
             <button key={item} type="button" onClick={() => setText(item)}>
@@ -186,6 +301,15 @@ export function NoteComposer({
           {t("Message", "Nachricht")}
           <textarea rows={3} value={text} onChange={(e) => setText(e.target.value)} />
         </label>
+        {recipient !== DEMO_STUDENT && (
+          <p className="demo-note">
+            <Icon name="idea" size={16} />
+            {t(
+              `Only ${DEMO_STUDENT} has a demo student account. ${recipient}’s note is saved in Messages; “Send to demo student” also puts a copy in ${DEMO_STUDENT}’s inbox so you can see how it arrives.`,
+              `Nur ${DEMO_STUDENT} hat ein Demo-Konto. Die Notiz an ${recipient} wird in Nachrichten gespeichert; „An Demo-Kind senden“ legt zusätzlich eine Kopie in ${DEMO_STUDENT}s Postfach, damit Sie sehen, wie sie ankommt.`,
+            )}
+          </p>
+        )}
         <div className="modal-actions">
           <Button icon="speaker" variant="ghost" className="modal-read" onClick={requestReadAloud}>
             {t("Read aloud", "Vorlesen")}
@@ -193,15 +317,13 @@ export function NoteComposer({
           <Button icon="close" variant="ghost" onClick={onClose}>
             {t("Cancel", "Abbrechen")}
           </Button>
-          <Button
-            icon="arrow"
-            disabled={!text.trim()}
-            onClick={() => {
-              sendTeacherNote(student, text.trim(), common);
-              onClose();
-            }}
-          >
-            {t("Send note", "Notiz senden")}
+          {recipient !== DEMO_STUDENT && (
+            <Button icon="eye" variant="secondary" disabled={!text.trim()} onClick={() => send(true)}>
+              {t("Send to demo student", "An Demo-Kind senden")}
+            </Button>
+          )}
+          <Button icon="arrow" disabled={!text.trim()} onClick={() => send(false)}>
+            {t(`Send to ${recipient}`, `An ${recipient} senden`)}
           </Button>
         </div>
       </div>
@@ -551,6 +673,8 @@ export function TodayPanel({
 type Live = { khadija: KhadijaLive };
 
 function quiz4Label(student: RosterStudent, live: KhadijaLive, s: ReturnType<typeof useClassState>, t: ReturnType<typeof makeT>) {
+  if (classOf(student) !== "4B")
+    return student.quizzes[3] === null ? t("Not marked yet", "Noch nicht bewertet") : `${student.quizzes[3]}%`;
   if (student.name === "Khadija")
     return live.awardedMark === null ? t("Needs review", "Prüfung offen") : `${live.percent}%`;
   if ((student.name === "Mariam" || student.name === "Salma") && !s.otherReviewed.includes(student.name))
@@ -570,7 +694,10 @@ export function RosterPage({
   const s = useClassState();
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<"all" | "support" | "track" | "review" | "missing">("all");
-  const rows = roster.filter((student) => {
+  // Starts on the class chosen in the class picker; "all" lists every class the teacher teaches.
+  const [classFilter, setClassFilter] = useState<ClassId | "all">(s.teacherClass);
+  const pool = classFilter === "all" ? allStudents : classFilter === "4B" ? roster : otherRosters[classFilter];
+  const rows = pool.filter((student) => {
     if (query && !student.name.toLowerCase().includes(query.trim().toLowerCase())) return false;
     const label = quiz4Label(student, khadija, s, t);
     if (filter === "support") return student.focus !== null;
@@ -583,7 +710,11 @@ export function RosterPage({
     <section>
       <div className="teacher-heading">
         <div>
-          <p className="kicker">{t("GRADE 4B · 22 STUDENTS", "KLASSE 4B · 22 KINDER")}</p>
+          <p className="kicker">
+            {classFilter === "all"
+              ? t(`ALL CLASSES · ${pool.length} STUDENTS`, `ALLE KLASSEN · ${pool.length} KINDER`)
+              : t(`GRADE ${classFilter} · ${pool.length} STUDENTS`, `KLASSE ${classFilter} · ${pool.length} KINDER`)}
+          </p>
           <h1>{t("Students", "Kinder")}</h1>
           <p>{t("Open a record to see progress, gaps and messages.", "Öffnen Sie eine Akte für Fortschritt, Lücken und Nachrichten.")}</p>
         </div>
@@ -598,6 +729,17 @@ export function RosterPage({
               onChange={(e) => setQuery(e.target.value)}
               placeholder={t("Student name", "Name des Kindes")}
             />
+          </label>
+          <label>
+            {t("Class", "Klasse")}
+            <select value={classFilter} onChange={(e) => setClassFilter(e.target.value as typeof classFilter)}>
+              <option value="all">{t("All classes", "Alle Klassen")}</option>
+              {(["4A", "4B", "4C"] as const).map((id) => (
+                <option key={id} value={id}>
+                  {t(`Grade ${id}`, `Klasse ${id}`)}
+                </option>
+              ))}
+            </select>
           </label>
           <label>
             {t("Show", "Anzeigen")}
@@ -624,10 +766,11 @@ export function RosterPage({
           {rows.map((student) => {
             const skill = skills.find((k) => k.id === student.focus);
             return (
-              <div className="roster-row" role="row" key={student.name}>
+              <div className="roster-row" role="row" key={`${classOf(student)}-${student.name}`}>
                 <span className="student-cell">
                   <b>{initials(student.name)}</b>
                   <strong>{student.name}</strong>
+                  <small className="class-tag">{classOf(student)}</small>
                 </span>
                 <span>{student.quizzes.slice(0, 3).join(" · ")}%</span>
                 <span>{quiz4Label(student, khadija, s, t)}</span>
@@ -649,7 +792,11 @@ export function RosterPage({
               </div>
             );
           })}
-          {rows.length === 0 && <p className="empty-row">{t("No students match.", "Keine passenden Kinder.")}</p>}
+          {rows.length === 0 && (
+            <p className="empty-row">
+              {t("No students match. Try “All classes” or another filter.", "Keine passenden Kinder. Versuchen Sie „Alle Klassen“ oder einen anderen Filter.")}
+            </p>
+          )}
         </div>
       </div>
     </section>
@@ -694,7 +841,7 @@ export function StudentRecord({
 }) {
   const t = makeT(common.language);
   const s = useClassState();
-  const student = roster.find((r) => r.name === name) ?? roster[0];
+  const student = allStudents.find((r) => r.name === name) ?? roster[0];
   const isKhadija = student.name === "Khadija";
   const q4 = isKhadija ? khadija.percent : quiz4Percent(student, s);
   const history = [...student.quizzes.slice(0, 3), q4].filter((v): v is number => v !== null);
@@ -707,7 +854,8 @@ export function StudentRecord({
         ? "pending"
         : "none"
     : student.practice;
-  const quizScore = isKhadija ? khadija.practiceScore : student.quizScore;
+  const attempts = s.popQuizzes[student.name] ?? [];
+  const quizScore = attempts.length ? attempts[attempts.length - 1].score : isKhadija ? khadija.practiceScore : student.quizScore;
   const threads = s.threads.filter((thread) => thread.student === student.name);
   return (
     <section>
@@ -716,7 +864,7 @@ export function StudentRecord({
           <button className="back-link" onClick={onBack}>
             <Icon name="arrow" /> {t("Back to students", "Zurück zu den Kindern")}
           </button>
-          <p className="kicker">{t("STUDENT RECORD · GRADE 4B", "AKTE · KLASSE 4B")}</p>
+          <p className="kicker">{t(`STUDENT RECORD · GRADE ${classOf(student)}`, `AKTE · KLASSE ${classOf(student)}`)}</p>
           <h1>{student.name}</h1>
         </div>
         <div className="row-actions">
@@ -817,6 +965,27 @@ export function StudentRecord({
                 ? t("Assigned, not done yet", "Zugewiesen, noch nicht erledigt")
                 : t("No practice assigned", "Keine Übung zugewiesen")}
           </Status>
+          {(s.popQuizzes[student.name] ?? []).length > 0 && (
+            <div className="improvement-record">
+              <p className="kicker">{t("IMPROVEMENT AFTER PRACTICE", "VERBESSERUNG NACH DER ÜBUNG")}</p>
+              <ol>
+                {(s.popQuizzes[student.name] ?? []).map((a) => {
+                  const pct = Math.round((a.score / 3) * 100);
+                  return (
+                    <li key={a.round}>
+                      <strong>
+                        {t("Try", "Versuch")} {a.round} · {a.at[common.language]}
+                      </strong>
+                      <span>
+                        {a.before}% → {pct}% ({pct - a.before >= 0 ? "+" : ""}
+                        {pct - a.before} {t("points", "Punkte")})
+                      </span>
+                    </li>
+                  );
+                })}
+              </ol>
+            </div>
+          )}
           {practice === "pending" && (
             <Button icon="bell" variant="secondary" onClick={() => sendPracticeReminder(student.name, common)}>
               {s.remindersSent.includes(student.name)
@@ -891,6 +1060,9 @@ export function AssessmentsPage({
     item.questions ?? (item.id === 4 ? quiz4Questions() : undefined);
   const [modelFile, setModelFile] = useState<string | null>(null);
   const [useRules, setUseRules] = useState<number[] | null>(null);
+  // Original scan viewer: open for any student with a paper, confirmed or not.
+  const [scanOf, setScanOf] = useState<string | null>(null);
+  const hasPaper = (name: string) => name !== "Judy" || (s.scanFiles[name]?.length ?? 0) > 0;
   const status = (student: RosterStudent) => {
     if (student.name === "Khadija") {
       if (!khadija.ocrVerified) return { type: "warn" as const, label: t("Check extracted text", "Erkannten Text prüfen"), action: true };
@@ -972,7 +1144,12 @@ export function AssessmentsPage({
                       <small className="uses-rules">{t("Extra page uploaded by you", "Zusätzliche Seite von Ihnen hochgeladen")}</small>
                     )}
                   </span>
-                  <span>
+                  <span className="row-actions">
+                    {hasPaper(student.name) && (
+                      <Button icon="eye" variant="ghost" onClick={() => setScanOf(student.name)}>
+                        {t("View scan", "Scan ansehen")}
+                      </Button>
+                    )}
                     {st.action && (
                       <Button icon="review" variant="secondary" onClick={() => onReview(student.name)}>
                         {t("Review", "Prüfen")}
@@ -983,6 +1160,19 @@ export function AssessmentsPage({
               );
             })}
           </div>
+          {scanOf && (
+            <ScanViewer
+              {...common}
+              student={scanOf}
+              status={status(roster.find((r) => r.name === scanOf)!)}
+              onClose={() => setScanOf(null)}
+              onReview={() => {
+                const name = scanOf;
+                setScanOf(null);
+                onReview(name);
+              }}
+            />
+          )}
         </div>
       )}
 
@@ -1331,52 +1521,171 @@ export function AssessmentsPage({
 export function QuestionReview({
   initialQuestion = 5,
   onOpenReview,
+  khadija,
   ...common
-}: Common & { initialQuestion?: 5 | 7; onOpenReview: (name: string) => void }) {
+}: Common & Live & { initialQuestion?: number; onOpenReview: (name: string) => void }) {
   const t = makeT(common.language);
+  const language = common.language;
   const s = useClassState();
-  const [question, setQuestion] = useState<5 | 7>(initialQuestion);
-  const [saveRule, setSaveRule] = useState(true);
+  const [question, setQuestion] = useState<number>(initialQuestion);
   const [editing, setEditing] = useState<string | null>(null);
-  const [lastBulk, setLastBulk] = useState<{ ruleId: number | null; names: string[] } | null>(null);
+  const [openWhy, setOpenWhy] = useState<string | null>(null);
+  // Bulk correction being prepared for one answer group.
+  const [draft, setDraft] = useState<null | {
+    answer: string;
+    mark: number;
+    text: string;
+    includeEdited: boolean;
+    save: boolean;
+  }>(null);
   const qp = t("Q", "A");
-  const markOf = (student: RosterStudent) => (question === 5 ? q5MarkOf(student, s) : q7MarkOf(student, s));
-  const groups =
-    question === 5
-      ? [
-          { id: "working", answer: t("4 each, with 20 ÷ 5 = 4", "je 4, mit 20 ÷ 5 = 4"), out: 4 },
-          { id: "noWorking", answer: t("4 each, no working", "je 4, ohne Rechenweg"), out: 4 },
-          { id: "wrong", answer: t("5 each", "je 5"), out: 4 },
-        ].map((g) => ({ ...g, students: roster.filter((r) => r.q5.group === g.id) }))
-      : [
-          {
-            id: "right",
-            answer: "2/3 > 3/5",
-            out: 3,
-            students: roster.filter((r) => r.focus !== "compare" && r.q5.group !== "missing"),
-          },
-          { id: "wrong", answer: "2/3 < 3/5", out: 3, students: roster.filter((r) => r.focus === "compare") },
-        ];
-  // Answers the suggested rule would still change (teacher edits are left alone).
-  const affected = roster.filter(
-    (r) => r.q5.group === "noWorking" && s.markEdits[`${r.name}:5`] === undefined && r.q5.mark < 2,
-  );
-  const setMark = (student: RosterStudent, mark: number, out: number) => {
-    const before = markOf(student);
+  const spec = specOf(question);
+  const scheme = s.scheme[question - 1];
+  // Papers that reached the teacher (Judy only after the bulk upload).
+  const papers = roster.filter((r) => r.q5.group !== "missing" || s.bulkUploaded);
+  const lockedKhadija = (student: RosterStudent) => student.name === "Khadija" && question === 2;
+  const current = (student: RosterStudent) =>
+    lockedKhadija(student) ? (khadija.awardedMark ?? answerOf(student, 2, s).ai) : markOf(student, question, s);
+  const groups = [...new Set(papers.map((r) => answerOf(r, question, s).answer))]
+    .map((answer) => {
+      const students = papers.filter((r) => answerOf(r, question, s).answer === answer);
+      const marks = students.map(current);
+      const counts = [...new Set(marks)].map((mark) => ({ mark, count: marks.filter((m) => m === mark).length }));
+      counts.sort((a, b) => b.count - a.count || b.mark - a.mark);
+      return { answer, students, usual: counts[0].mark, inconsistent: counts.length > 1, counts };
+    })
+    .sort((a, b) => Number(b.inconsistent) - Number(a.inconsistent) || b.students.length - a.students.length);
+  const inconsistentCount = groups.filter((g) => g.inconsistent).length;
+  const rulesHere = s.bulkRules.filter((r) => r.q === question);
+
+  const changeMark = (student: RosterStudent, mark: number) => {
+    const before = markOf(student, question, s);
     setEditing(null);
     if (mark === before) return;
     updateClassState((st) => ({ markEdits: { ...st.markEdits, [`${student.name}:${question}`]: mark } }));
     logActivity("override", student.name, {
-      EN: `Quiz 4 · Q${question}: mark changed ${before}/${out} → ${mark}/${out} (review by question)`,
-      DE: `Quiz 4 · A${question}: Bewertung geändert ${before}/${out} → ${mark}/${out} (Prüfung nach Aufgabe)`,
+      EN: `Quiz 4 · Q${question}: mark changed ${before}/${spec.out} → ${mark}/${spec.out} (review by question)`,
+      DE: `Quiz 4 · A${question}: Bewertung geändert ${before}/${spec.out} → ${mark}/${spec.out} (Prüfung nach Aufgabe)`,
     });
     common.notify(
       t(
-        `${student.name}’s ${qp}${question} mark changed to ${mark}/${out}.`,
-        `${student.name}: ${qp}${question} auf ${mark}/${out} geändert.`,
+        `${student.name}’s ${qp}${question} mark changed to ${mark}/${spec.out}.`,
+        `${student.name}: ${qp}${question} auf ${mark}/${spec.out} geändert.`,
       ),
     );
   };
+
+  /** Answers a correction would change: same answer, different mark, not locked; own edits only on request. */
+  const affectedBy = (answer: string, mark: number, includeEdited: boolean) =>
+    papers.filter(
+      (r) =>
+        answerOf(r, question, s).answer === answer &&
+        !lockedKhadija(r) &&
+        current(r) !== mark &&
+        (includeEdited || markSource(r, question, s) !== "teacher"),
+    );
+  const keptEdits = (answer: string, mark: number) =>
+    papers.filter(
+      (r) =>
+        answerOf(r, question, s).answer === answer &&
+        markSource(r, question, s) === "teacher" &&
+        current(r) !== mark,
+    );
+  /** The same kind of answer in other questions (answer right but no working, unit missing, …). */
+  const similarElsewhere = (answer: string) => {
+    const pattern = papers.map((r) => answerOf(r, question, s)).find((a) => a.answer === answer)?.variant;
+    const kind =
+      pattern === "noWorking" || pattern === "noWorkingLow" || pattern === "answerOnly"
+        ? "noWorking"
+        : pattern === "noUnit"
+          ? "noUnit"
+          : null;
+    if (!kind) return [];
+    const matches = kind === "noWorking" ? ["noWorking", "noWorkingLow", "answerOnly"] : ["noUnit", "noWorkingLow"];
+    return quiz4Spec
+      .filter((q) => q.n !== question)
+      .map((q) => ({
+        n: q.n,
+        count: papers.filter((r) => matches.includes(answerOf(r, q.n, s).variant)).length,
+      }))
+      .filter((x) => x.count > 0);
+  };
+
+  const startDraft = (answer: string, usual: number) => {
+    const isNoWorking = question === 5 && answer === "4 each";
+    setDraft({
+      answer,
+      mark: usual,
+      text: isNoWorking
+        ? t("Correct answer without working = half marks", "Richtiges Ergebnis ohne Rechenweg = halbe Punktzahl")
+        : t(`${qp}${question}: “${answer}” = ${usual} of ${spec.out} marks`, `${qp}${question}: „${answer}“ = ${usual} von ${spec.out} Punkten`),
+      includeEdited: false,
+      save: true,
+    });
+  };
+
+  const approve = () => {
+    if (!draft) return;
+    const names = affectedBy(draft.answer, draft.mark, draft.includeEdited).map((r) => r.name);
+    if (names.length === 0) return;
+    const ruleId = newId();
+    const savedRuleId = draft.save ? newId() : null;
+    const text = { EN: draft.text.trim(), DE: draft.text.trim() };
+    const previous = Object.fromEntries(names.map((name) => [name, current(roster.find((r) => r.name === name)!)]));
+    updateClassState((st) => {
+      const markEdits = { ...st.markEdits };
+      names.forEach((name) => delete markEdits[`${name}:${question}`]);
+      return {
+        markEdits,
+        // A newer rule for the same students wins: older rules drop them.
+        bulkRules: [
+          ...st.bulkRules.map((r) => (r.q === question ? { ...r, names: r.names.filter((n) => !names.includes(n)) } : r)),
+          { id: ruleId, q: question, answer: draft.answer, mark: draft.mark, names, text, savedRuleId },
+        ],
+        savedRules: savedRuleId
+          ? [
+              ...st.savedRules,
+              {
+                id: savedRuleId,
+                scope: { EN: `From Quiz 4 · Q${question}`, DE: `Aus Quiz 4 · A${question}` },
+                text,
+                source: { q: question, answer: draft.answer, mark: draft.mark, out: spec.out },
+              },
+            ]
+          : st.savedRules,
+      };
+    });
+    names.forEach((name) =>
+      logActivity("override", name, {
+        EN: `Quiz 4 · Q${question}: bulk correction ${previous[name]}/${spec.out} → ${draft.mark}/${spec.out} (${draft.text.trim()})`,
+        DE: `Quiz 4 · A${question}: Sammelkorrektur ${previous[name]}/${spec.out} → ${draft.mark}/${spec.out} (${draft.text.trim()})`,
+      }),
+    );
+    setDraft(null);
+    common.notify(
+      t(
+        `Bulk correction applied to ${names.length} ${names.length === 1 ? "answer" : "answers"}${savedRuleId ? "; rule saved" : ""}.`,
+        `Sammelkorrektur auf ${names.length} ${names.length === 1 ? "Antwort" : "Antworten"} angewendet${savedRuleId ? "; Regel gespeichert" : ""}.`,
+      ),
+    );
+  };
+
+  const undoRule = (id: number) => {
+    const rule = s.bulkRules.find((r) => r.id === id);
+    if (!rule) return;
+    updateClassState((st) => ({
+      bulkRules: st.bulkRules.filter((r) => r.id !== id),
+      savedRules: rule.savedRuleId ? st.savedRules.filter((r) => r.id !== rule.savedRuleId) : st.savedRules,
+    }));
+    rule.names.forEach((name) =>
+      logActivity("override", name, {
+        EN: `Quiz 4 · Q${rule.q}: bulk correction undone`,
+        DE: `Quiz 4 · A${rule.q}: Sammelkorrektur rückgängig gemacht`,
+      }),
+    );
+    common.notify(t("Bulk correction undone.", "Sammelkorrektur rückgängig gemacht."));
+  };
+
   return (
     <section>
       <div className="teacher-heading">
@@ -1385,8 +1694,8 @@ export function QuestionReview({
           <h1>{t("Review by question", "Nach Aufgabe prüfen")}</h1>
           <p>
             {t(
-              "Compare how the same answer was marked for every student. Click a mark to change it.",
-              "Vergleichen Sie, wie dieselbe Antwort bei allen Kindern bewertet wurde. Klicken Sie auf eine Bewertung, um sie zu ändern.",
+              "See one question across every student’s paper. Same answers are grouped; click a mark to change it.",
+              "Eine Aufgabe in allen Arbeiten ansehen. Gleiche Antworten sind gruppiert; klicken Sie auf eine Bewertung, um sie zu ändern.",
             )}
           </p>
         </div>
@@ -1395,32 +1704,96 @@ export function QuestionReview({
           <select
             value={question}
             onChange={(e) => {
-              setQuestion(Number(e.target.value) as 5 | 7);
+              setQuestion(Number(e.target.value));
               setEditing(null);
+              setDraft(null);
+              setOpenWhy(null);
             }}
           >
-            <option value={5}>{t("Q5 · Share 20 apples (4 marks)", "A5 · Teile 20 Äpfel (4 Punkte)")}</option>
-            <option value={7}>{t("Q7 · Compare 2/3 and 3/5 (3 marks)", "A7 · Vergleiche 2/3 und 3/5 (3 Punkte)")}</option>
+            {quiz4Spec.map((q) => (
+              <option key={q.n} value={q.n}>
+                {qp}
+                {q.n} · {q.title[language]} ({q.out} {t("marks", "Punkte")})
+              </option>
+            ))}
           </select>
         </label>
       </div>
+
+      <div className="question-tabs" role="tablist" aria-label={t("Questions", "Aufgaben")}>
+        {quiz4Spec.map((q) => {
+          const answers = [...new Set(papers.map((r) => answerOf(r, q.n, s).answer))];
+          const odd = answers.some((answer) => {
+            const marks = papers
+              .filter((r) => answerOf(r, q.n, s).answer === answer)
+              .map((r) => (r.name === "Khadija" && q.n === 2 ? (khadija.awardedMark ?? 3) : markOf(r, q.n, s)));
+            return new Set(marks).size > 1;
+          });
+          return (
+            <button
+              key={q.n}
+              role="tab"
+              aria-selected={q.n === question}
+              className={q.n === question ? "active" : ""}
+              onClick={() => {
+                setQuestion(q.n);
+                setEditing(null);
+                setDraft(null);
+                setOpenWhy(null);
+              }}
+            >
+              {qp}
+              {q.n}
+              {odd && (
+                <i className="tab-warn" aria-label={t("inconsistent marks", "uneinheitliche Bewertung")}>
+                  !
+                </i>
+              )}
+            </button>
+          );
+        })}
+      </div>
+
+      <article className="panel question-facts">
+        <div>
+          <span>{t("Model answer", "Musterlösung")}</span>
+          <b>{scheme?.model ?? spec.model}</b>
+        </div>
+        <div>
+          <span>{t("Marking rule", "Bewertungsregel")}</span>
+          <b>{scheme?.rule[language]}</b>
+        </div>
+        <div>
+          <span>{t("Papers", "Arbeiten")}</span>
+          <b>{papers.length}</b>
+        </div>
+        <div>
+          <span>{t("Answer groups", "Antwortgruppen")}</span>
+          <b>
+            {groups.length}
+            {inconsistentCount > 0 && (
+              <Status type="warn">{t(`${inconsistentCount} inconsistent`, `${inconsistentCount} uneinheitlich`)}</Status>
+            )}
+          </b>
+        </div>
+      </article>
+
       <div className="group-list">
         {groups.map((group) => {
-          const marks = group.students.map(markOf);
-          const distinct = [...new Set(marks)];
-          const inconsistent = distinct.length > 1;
-          // The most common mark in the group is the reference; others are highlighted.
-          const usual = distinct.sort((a, b) => marks.filter((m) => m === b).length - marks.filter((m) => m === a).length)[0];
+          const key = `${question}:${group.answer}`;
+          const reasons = [...new Set(group.students.map((r) => answerOf(r, question, s).variant))].map((variant) => spec.variants[variant]);
+          const drafting = draft?.answer === group.answer;
           return (
-            <article className={`panel answer-group ${inconsistent ? "inconsistent" : ""}`} key={group.id}>
+            <article className={`panel answer-group ${group.inconsistent ? "inconsistent" : ""}`} key={key}>
               <div className="panel-head">
                 <div>
                   <p className="kicker">
-                    {t(`${group.students.length} STUDENTS`, `${group.students.length} KINDER`)}
+                    {t(`${group.students.length} ${group.students.length === 1 ? "STUDENT" : "STUDENTS"}`, `${group.students.length} ${group.students.length === 1 ? "KIND" : "KINDER"}`)} ·{" "}
+                    {group.counts.map((c) => `${c.count}× ${c.mark}/${spec.out}`).join(" · ")}
                   </p>
                   <h2>“{group.answer}”</h2>
                 </div>
-                {inconsistent ? (
+                {group.inconsistent ? (
                   <Status type="warn">{t("Inconsistent marks", "Uneinheitliche Bewertung")}</Status>
                 ) : (
                   <Status type="good">{t("Consistent", "Einheitlich")}</Status>
@@ -1428,9 +1801,9 @@ export function QuestionReview({
               </div>
               <div className="group-students">
                 {group.students.map((student) => {
-                  const mark = markOf(student);
-                  const edited = s.markEdits[`${student.name}:${question}`] !== undefined;
-                  const odd = inconsistent && mark !== usual;
+                  const mark = current(student);
+                  const source = lockedKhadija(student) ? "teacher" : markSource(student, question, s);
+                  const odd = group.inconsistent && mark !== group.usual;
                   if (editing === student.name)
                     return (
                       <label className="mark-edit" key={student.name}>
@@ -1439,13 +1812,13 @@ export function QuestionReview({
                           autoFocus
                           aria-label={t(`New mark for ${student.name}`, `Neue Bewertung für ${student.name}`)}
                           value={mark}
-                          onChange={(e) => setMark(student, Number(e.target.value), group.out)}
+                          onChange={(e) => changeMark(student, Number(e.target.value))}
                           onBlur={() => setEditing(null)}
                           onKeyDown={(e) => e.key === "Escape" && setEditing(null)}
                         >
-                          {Array.from({ length: group.out + 1 }, (_, i) => (
-                            <option key={i} value={group.out - i}>
-                              {group.out - i}/{group.out}
+                          {Array.from({ length: spec.out + 1 }, (_, i) => (
+                            <option key={i} value={spec.out - i}>
+                              {spec.out - i}/{spec.out}
                             </option>
                           ))}
                         </select>
@@ -1455,156 +1828,234 @@ export function QuestionReview({
                     <button
                       type="button"
                       key={student.name}
-                      className={`mark-chip ${odd ? "odd" : ""} ${edited ? "edited" : ""}`}
+                      className={`mark-chip ${odd ? "odd" : ""} ${source !== "ai" ? "edited" : ""}`}
                       title={
-                        student.name === "Khadija"
-                          ? t("Khadija’s marks are set in her review", "Khadijas Bewertung wird in ihrer Prüfung festgelegt")
-                          : t("Change this mark", "Bewertung ändern")
+                        lockedKhadija(student)
+                          ? t("Khadija’s Q2 mark is set in her review", "Khadijas Bewertung für A2 wird in ihrer Prüfung festgelegt")
+                          : answerOf(student, question, s).reason[language]
                       }
-                      onClick={() => (student.name === "Khadija" ? onOpenReview("Khadija") : setEditing(student.name))}
+                      onClick={() => (lockedKhadija(student) ? onOpenReview("Khadija") : setEditing(student.name))}
                     >
                       {student.name}{" "}
                       <b>
-                        {mark}/{group.out}
+                        {mark}/{spec.out}
                       </b>
-                      {student.name === "Khadija" ? (
+                      {lockedKhadija(student) ? (
                         <Icon name="lock" size={13} />
-                      ) : edited ? (
+                      ) : source === "teacher" ? (
                         <small>{t("edited", "geändert")}</small>
+                      ) : source === "rule" ? (
+                        <small>{t("rule", "Regel")}</small>
                       ) : null}
                     </button>
                   );
                 })}
               </div>
+              <div className="group-tools">
+                <button
+                  type="button"
+                  className="link-button"
+                  aria-expanded={openWhy === key}
+                  onClick={() => setOpenWhy(openWhy === key ? null : key)}
+                >
+                  <Icon name="spark" size={16} />
+                  {openWhy === key ? t("Hide AI reasoning", "KI-Begründung ausblenden") : t("Why did the AI give these marks?", "Warum hat die KI so bewertet?")}
+                </button>
+                {group.inconsistent && !drafting && (
+                  <Button icon="edit" variant="secondary" onClick={() => startDraft(group.answer, group.usual)}>
+                    {t("Correct this group", "Gruppe korrigieren")}
+                  </Button>
+                )}
+              </div>
+              {openWhy === key && (
+                <div className="why-list">
+                  {reasons.map((variant) => (
+                    <div key={`${variant.ai}-${variant.reason.EN}`}>
+                      <strong>
+                        {t("AI mark", "KI-Bewertung")} {variant.ai}/{spec.out} · {variant.confidence}%
+                      </strong>
+                      <p>{variant.reason[language]}</p>
+                      <ul className="criteria-list">
+                        {variant.criteria.map((cr) => (
+                          <li key={cr.text.EN}>
+                            <Icon name={cr.met ? "check" : "close"} size={16} /> {cr.text[language]} ({cr.met ? cr.marks : 0}/{cr.marks})
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {drafting && draft && (
+                <div className="bulk-draft">
+                  <p className="kicker">{t("BULK CORRECTION", "SAMMELKORREKTUR")}</p>
+                  <p>
+                    {t(
+                      `The AI suggests one mark for every “${group.answer}” answer: most papers have ${group.usual}/${spec.out}.`,
+                      `Die KI schlägt eine Bewertung für alle Antworten „${group.answer}“ vor: Die meisten Arbeiten haben ${group.usual}/${spec.out}.`,
+                    )}
+                  </p>
+                  <div className="bulk-fields">
+                    <label>
+                      {t("Correct mark for this answer", "Richtige Bewertung für diese Antwort")}
+                      <select value={draft.mark} onChange={(e) => setDraft({ ...draft, mark: Number(e.target.value) })}>
+                        {Array.from({ length: spec.out + 1 }, (_, i) => (
+                          <option key={i} value={spec.out - i}>
+                            {spec.out - i}/{spec.out}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label>
+                      {t("Rule (in your words)", "Regel (in Ihren Worten)")}
+                      <input value={draft.text} onChange={(e) => setDraft({ ...draft, text: e.target.value })} />
+                    </label>
+                  </div>
+                  {(() => {
+                    const affected = affectedBy(draft.answer, draft.mark, draft.includeEdited);
+                    const kept = draft.includeEdited ? [] : keptEdits(draft.answer, draft.mark);
+                    const elsewhere = similarElsewhere(draft.answer);
+                    return (
+                      <>
+                        <h3 className="preview-title">
+                          {t("Preview", "Vorschau")} ·{" "}
+                          {affected.length === 1
+                            ? t("1 mark will change", "1 Bewertung ändert sich")
+                            : t(`${affected.length} marks will change`, `${affected.length} Bewertungen ändern sich`)}
+                        </h3>
+                        {affected.length === 0 ? (
+                          <p className="panel-note">{t("No marks change with this rule.", "Mit dieser Regel ändert sich keine Bewertung.")}</p>
+                        ) : (
+                          <div className="preview-table" role="table">
+                            {affected.map((r) => {
+                              const now = quiz4Percent(r, s) ?? 0;
+                              const after = now + (draft.mark - current(r)) * 4;
+                              return (
+                                <div role="row" key={r.name}>
+                                  <span>{r.name}</span>
+                                  <b>
+                                    {current(r)}/{spec.out} → {draft.mark}/{spec.out}
+                                  </b>
+                                  <small>
+                                    {t("Quiz 4", "Quiz 4")}: {now}% → {after}%
+                                  </small>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
+                        {kept.length > 0 && (
+                          <p className="panel-note">
+                            {t(
+                              `Not changed – you set these marks yourself: ${kept.map((r) => r.name).join(", ")}.`,
+                              `Nicht geändert – diese Bewertungen haben Sie selbst gesetzt: ${kept.map((r) => r.name).join(", ")}.`,
+                            )}
+                          </p>
+                        )}
+                        {(kept.length > 0 || draft.includeEdited) && (
+                          <label className="share-toggle">
+                            <input
+                              type="checkbox"
+                              checked={draft.includeEdited}
+                              onChange={(e) => setDraft({ ...draft, includeEdited: e.target.checked })}
+                            />
+                            <span>
+                              <strong>{t("Also change marks I set myself", "Auch selbst gesetzte Bewertungen ändern")}</strong>
+                            </span>
+                          </label>
+                        )}
+                        {elsewhere.length > 0 && (
+                          <div className="similar-elsewhere">
+                            <Icon name="idea" size={16} />
+                            <span>
+                              {t("The AI found similar answers in other questions:", "Die KI hat ähnliche Antworten in anderen Aufgaben gefunden:")}{" "}
+                              {elsewhere.map((x, i) => (
+                                <Fragment key={x.n}>
+                                  {i > 0 && ", "}
+                                  <button
+                                    type="button"
+                                    className="link-button"
+                                    onClick={() => {
+                                      setQuestion(x.n);
+                                      setDraft(null);
+                                      setEditing(null);
+                                    }}
+                                  >
+                                    {qp}
+                                    {x.n} ({x.count})
+                                  </button>
+                                </Fragment>
+                              ))}
+                            </span>
+                          </div>
+                        )}
+                        <label className="share-toggle">
+                          <input type="checkbox" checked={draft.save} onChange={(e) => setDraft({ ...draft, save: e.target.checked })} />
+                          <span>
+                            <strong>{t("Save this rule for future assessments", "Regel für künftige Prüfungen speichern")}</strong>
+                            <small>
+                              {t(
+                                "You can choose it when you create a new assessment.",
+                                "Sie können sie beim Anlegen einer neuen Prüfung auswählen.",
+                              )}
+                            </small>
+                          </span>
+                        </label>
+                        <div className="upload-actions">
+                          <Button icon="close" variant="ghost" onClick={() => setDraft(null)}>
+                            {t("Cancel", "Abbrechen")}
+                          </Button>
+                          <Button icon="check" disabled={affected.length === 0 || !draft.text.trim()} onClick={approve}>
+                            {affected.length === 1
+                              ? t("Approve for 1 answer", "Für 1 Antwort freigeben")
+                              : t(`Approve for ${affected.length} answers`, `Für ${affected.length} Antworten freigeben`)}
+                          </Button>
+                        </div>
+                      </>
+                    );
+                  })()}
+                </div>
+              )}
             </article>
           );
         })}
       </div>
-      {question === 5 && (
+
+      {rulesHere.length > 0 && (
         <article className="panel rule-panel">
-          <div className="ai-title">
-            <span>
-              <Icon name="spark" />
-            </span>
-            <div>
-              <p className="kicker">{t("SUGGESTED BULK CORRECTION", "VORGESCHLAGENE SAMMELKORREKTUR")}</p>
-              <h2>{t("Correct answer without working = 2 of 4 marks", "Richtiges Ergebnis ohne Rechenweg = 2 von 4 Punkten")}</h2>
-            </div>
-          </div>
-          {s.q5RuleApplied ? (
-            <div className="confirmed-box">
+          <p className="kicker">{t("APPLIED CORRECTIONS", "ANGEWENDETE KORREKTUREN")}</p>
+          {rulesHere.map((rule) => (
+            <div className="confirmed-box" key={rule.id}>
               <Icon name="check" />
               <div>
-                <strong>{t("Correction applied", "Korrektur angewendet")}</strong>
+                <strong>{rule.text[language]}</strong>
                 <p>
                   {t(
-                    "All “4 each, no working” answers now have 2 of 4 marks, unless you changed a mark yourself.",
-                    "Alle Antworten „je 4, ohne Rechenweg“ haben jetzt 2 von 4 Punkten, außer Sie haben eine Bewertung selbst geändert.",
+                    `“${rule.answer}” → ${rule.mark}/${spec.out} for ${rule.names.join(", ") || "nobody (later edits)"}.`,
+                    `„${rule.answer}“ → ${rule.mark}/${spec.out} für ${rule.names.join(", ") || "niemanden (spätere Änderungen)"}.`,
                   )}
+                  {rule.savedRuleId && ` ${t("Saved for future assessments.", "Für künftige Prüfungen gespeichert.")}`}
                 </p>
-                <Button
-                  icon="close"
-                  variant="ghost"
-                  onClick={() => {
-                    const undo = lastBulk;
-                    updateClassState((st) => ({
-                      q5RuleApplied: false,
-                      savedRules: undo?.ruleId ? st.savedRules.filter((r) => r.id !== undo.ruleId) : st.savedRules,
-                    }));
-                    (undo?.names ?? []).forEach((name) =>
-                      logActivity("override", name, {
-                        EN: "Quiz 4 · Q5: bulk correction undone",
-                        DE: "Quiz 4 · A5: Sammelkorrektur rückgängig gemacht",
-                      }),
-                    );
-                    setLastBulk(null);
-                    common.notify(t("Bulk correction undone.", "Sammelkorrektur rückgängig gemacht."));
-                  }}
-                >
+                <Button icon="close" variant="ghost" onClick={() => undoRule(rule.id)}>
                   {t("Undo correction", "Korrektur rückgängig machen")}
                 </Button>
               </div>
             </div>
-          ) : affected.length === 0 ? (
-            <p>{t("No answers need this correction any more.", "Keine Antwort braucht diese Korrektur mehr.")}</p>
-          ) : (
-            <>
-              <p>
-                {affected.length === 1
-                  ? t(
-                      "The AI found 1 similar answer marked lower. Preview – this mark will change:",
-                      "Die KI hat 1 ähnliche, niedriger bewertete Antwort gefunden. Vorschau – diese Bewertung ändert sich:",
-                    )
-                  : t(
-                      `The AI found ${affected.length} similar answers marked lower. Preview – these marks will change:`,
-                      `Die KI hat ${affected.length} ähnliche, niedriger bewertete Antworten gefunden. Vorschau – diese Bewertungen ändern sich:`,
-                    )}
-              </p>
-              <div className="group-students">
-                {affected.map((r) => {
-                  const now = quiz4Percent(r, s) ?? 0;
-                  return (
-                    <span key={r.name}>
-                      {r.name} <b>{q5MarkOf(r, s)}/4 → 2/4</b> ({now}% → {now + (2 - q5MarkOf(r, s)) * 4}%)
-                    </span>
-                  );
-                })}
-              </div>
-              <label className="share-toggle">
-                <input type="checkbox" checked={saveRule} onChange={(e) => setSaveRule(e.target.checked)} />
-                <span>
-                  <strong>{t("Save this rule for future assessments", "Regel für künftige Prüfungen speichern")}</strong>
-                  <small>
-                    {t(
-                      "You can choose it when you create a new assessment.",
-                      "Sie können sie beim Anlegen einer neuen Prüfung auswählen.",
-                    )}
-                  </small>
-                </span>
-              </label>
-              <Button
-                icon="check"
-                onClick={() => {
-                  const ruleId = saveRule ? newId() : null;
-                  updateClassState((st) => ({
-                    q5RuleApplied: true,
-                    savedRules: ruleId
-                      ? [
-                          ...st.savedRules,
-                          {
-                            id: ruleId,
-                            scope: { EN: "Word problems", DE: "Sachaufgaben" },
-                            text: {
-                              EN: "Correct answer without working = half marks",
-                              DE: "Richtiges Ergebnis ohne Rechenweg = halbe Punktzahl",
-                            },
-                          },
-                        ]
-                      : st.savedRules,
-                  }));
-                  setLastBulk({ ruleId, names: affected.map((r) => r.name) });
-                  affected.forEach((r) =>
-                    logActivity("override", r.name, {
-                      EN: `Quiz 4 · Q5: bulk correction ${r.q5.mark}/4 → 2/4 (no working rule)`,
-                      DE: `Quiz 4 · A5: Sammelkorrektur ${r.q5.mark}/4 → 2/4 (Regel ohne Rechenweg)`,
-                    }),
-                  );
-                  common.notify(
-                    t(
-                      `Bulk correction applied to ${affected.length} answers.`,
-                      `Sammelkorrektur auf ${affected.length} Antworten angewendet.`,
-                    ),
-                  );
-                }}
-              >
-                {affected.length === 1
-                  ? t("Approve for 1 answer", "Für 1 Antwort freigeben")
-                  : t(`Approve for ${affected.length} answers`, `Für ${affected.length} Antworten freigeben`)}
-              </Button>
-            </>
-          )}
+          ))}
         </article>
       )}
+
+      <article className="panel rule-panel">
+        <p className="kicker">{t("SAVED RULES · REUSED IN NEW ASSESSMENTS", "GESPEICHERTE REGELN · FÜR NEUE PRÜFUNGEN")}</p>
+        <ul className="saved-rules">
+          {s.savedRules.map((rule) => (
+            <li key={rule.id}>
+              <strong>{rule.text[language]}</strong>
+              <small>{rule.scope[language]}</small>
+            </li>
+          ))}
+        </ul>
+      </article>
     </section>
   );
 }
@@ -1701,7 +2152,7 @@ export function Gradebook({ khadija, ...common }: Common & Live) {
 // ---------------------------------------------------------------------------
 // C23 + C33 – Skill tree and revision plan
 // ---------------------------------------------------------------------------
-export function SkillTree({ onOpenStudent, ...common }: Common & { onOpenStudent: (name: string) => void }) {
+export function SkillTree({ onOpenStudent, khadija, ...common }: Common & Live & { onOpenStudent: (name: string) => void }) {
   const t = makeT(common.language);
   const language = common.language;
   const s = useClassState();
@@ -1709,7 +2160,7 @@ export function SkillTree({ onOpenStudent, ...common }: Common & { onOpenStudent
   const skill = skills.find((k) => k.id === selected) ?? skills[0];
   const strands = useMemo(() => [...new Set(skills.map((k) => k.strand.EN))], []);
   const affected = studentsFor(skill.id);
-  const suggestions = [...skills].sort((a, b) => a.mastery - b.mastery).slice(0, 4);
+  const plan4B = s.revisionPlans["4B"];
   const level = skillLevel(skill.mastery);
   return (
     <section>
@@ -1786,10 +2237,12 @@ export function SkillTree({ onOpenStudent, ...common }: Common & { onOpenStudent
             <Button
               icon="trend"
               variant="secondary"
-              disabled={s.revisionPlan.includes(skill.id)}
-              onClick={() => updateClassState((st) => ({ revisionPlan: [...st.revisionPlan, skill.id] }))}
+              disabled={plan4B.includes(skill.id)}
+              onClick={() =>
+                updateClassState((st) => ({ revisionPlans: { ...st.revisionPlans, "4B": [...st.revisionPlans["4B"], skill.id] } }))
+              }
             >
-              {s.revisionPlan.includes(skill.id) ? t("In revision plan", "Im Wiederholungsplan") : t("Add to revision plan", "Zum Wiederholungsplan")}
+              {plan4B.includes(skill.id) ? t("In revision plan", "Im Wiederholungsplan") : t("Add to revision plan", "Zum Wiederholungsplan")}
             </Button>
             {affected.length > 0 && (
               <Button
@@ -1810,47 +2263,7 @@ export function SkillTree({ onOpenStudent, ...common }: Common & { onOpenStudent
           </div>
         </aside>
       </div>
-      <article className="panel revision-panel">
-        <div className="panel-head">
-          <div>
-            <p className="kicker">{t("REVISION PLANNING", "WIEDERHOLUNGSPLANUNG")}</p>
-            <h2>{t("Suggested topics for the next revision lesson", "Vorgeschlagene Themen für die nächste Wiederholungsstunde")}</h2>
-          </div>
-          <Status type="neutral">{t("AI suggestion – you decide", "KI-Vorschlag – Sie entscheiden")}</Status>
-        </div>
-        {suggestions.map((k, index) => (
-          <div className="revision-row" key={k.id}>
-            <em>{index + 1}</em>
-            <span>
-              <strong>{k.name[language]}</strong>
-              <small>
-                {k.mastery}% {t("secure", "sicher")} · {studentsFor(k.id).length} {t("students flagged", "Kinder markiert")} · {k.activity[language]}
-              </small>
-            </span>
-            {s.revisionPlan.includes(k.id) ? (
-              <Button
-                icon="close"
-                variant="ghost"
-                onClick={() => updateClassState((st) => ({ revisionPlan: st.revisionPlan.filter((x) => x !== k.id) }))}
-              >
-                {t("Remove", "Entfernen")}
-              </Button>
-            ) : (
-              <Button icon="check" variant="secondary" onClick={() => updateClassState((st) => ({ revisionPlan: [...st.revisionPlan, k.id] }))}>
-                {t("Add", "Hinzufügen")}
-              </Button>
-            )}
-          </div>
-        ))}
-        <p className="panel-note">
-          {s.revisionPlan.length
-            ? t(
-                `Monday revision plan: ${s.revisionPlan.map((id) => skills.find((k) => k.id === id)?.name.EN).join(", ")}.`,
-                `Wiederholungsplan für Montag: ${s.revisionPlan.map((id) => skills.find((k) => k.id === id)?.name.DE).join(", ")}.`,
-              )
-            : t("No topics in the plan yet.", "Noch keine Themen im Plan.")}
-        </p>
-      </article>
+      <RevisionPlanner classId="4B" summary={summary4B(khadija, s)} language={language} notify={common.notify} />
     </section>
   );
 }
@@ -1859,46 +2272,466 @@ export function SkillTree({ onOpenStudent, ...common }: Common & { onOpenStudent
 // C31 – Practice and pop-quiz monitoring
 // ---------------------------------------------------------------------------
 // ---------------------------------------------------------------------------
-// C30 – Approve, replace or assign learning resources (shown with the red flag)
+// C22 + C30 – End of marking: recurring-mistake check, then approve, modify,
+// replace and assign practice for that gap (every reviewed student)
 // ---------------------------------------------------------------------------
-export function ResourcesPanel({ language }: { language: Lang }) {
-  const t = makeT(language);
+export function GapReview({
+  student,
+  decision,
+  onDecide,
+  published = false,
+  onDone,
+  doneLabel,
+  ...common
+}: Common & {
+  student: string;
+  decision: "confirmed" | "dismissed" | "postponed" | null | undefined;
+  onDecide: (decision: "confirmed" | "dismissed" | "postponed") => void;
+  /** Khadija only: her practice is sent when results are published. */
+  published?: boolean;
+  onDone?: () => void;
+  doneLabel?: string;
+}) {
+  const t = makeT(common.language);
+  const language = common.language;
+  const rosterStudent = roster.find((r) => r.name === student) ?? roster[0];
+  const skill = skills.find((k) => k.id === rosterStudent.focus);
+  const evidence = evidenceFor(rosterStudent);
+  return (
+    <section className="panel redflag-panel">
+      <div className="ai-title">
+        <span>
+          <Icon name="flag" />
+        </span>
+        <div>
+          <p className="kicker">{t("END OF MARKING · RECURRING MISTAKES", "ENDE DER BEWERTUNG · WIEDERKEHRENDE FEHLER")}</p>
+          <h2>
+            {skill ? skill.name[language] : t("No recurring mistakes", "Keine wiederkehrenden Fehler")}{" "}
+            <HelpTip language={language} topic={t("Recurring mistake", "Wiederkehrender Fehler")}>
+              {t(
+                `After marking, the AI looks for the same mistake in ${student}’s earlier quizzes. If you confirm it, you can approve practice for this gap.`,
+                `Nach der Bewertung sucht die KI denselben Fehler in früheren Quizzen von ${student}. Wenn Sie ihn bestätigen, können Sie Übung für diese Lücke freigeben.`,
+              )}
+            </HelpTip>
+          </h2>
+        </div>
+      </div>
+      {!skill || evidence.length < 2 ? (
+        <>
+          <p>
+            {t(
+              `The AI found no mistake that repeats across ${student}’s quizzes.`,
+              `Die KI hat keinen Fehler gefunden, der sich in den Quizzen von ${student} wiederholt.`,
+            )}
+          </p>
+          {onDone && (
+            <Button icon="check" onClick={onDone}>
+              {doneLabel ?? t("Finish review", "Prüfung abschließen")}
+            </Button>
+          )}
+        </>
+      ) : (
+        <>
+          <p>
+            <b>{t("Recurring mistake:", "Wiederkehrender Fehler:")}</b> {skill.mistake[language]}.{" "}
+            {t(
+              `Found in ${evidence.length} quizzes in a row.`,
+              `In ${evidence.length} Quizzen hintereinander gefunden.`,
+            )}
+          </p>
+          <div className="evidence-timeline">
+            {evidence.map((item) => (
+              <article key={item.quiz}>
+                <span>{item.quiz}</span>
+                <strong>{item.item}</strong>
+                <small>{item.note[language]}</small>
+              </article>
+            ))}
+          </div>
+          {decision && (
+            <Status type={decision === "confirmed" ? "warn" : "neutral"}>
+              {decision === "confirmed"
+                ? t("Learning gap confirmed", "Lernlücke bestätigt")
+                : decision === "dismissed"
+                  ? t("Flag dismissed", "Hinweis verworfen")
+                  : t("Flag postponed", "Hinweis zurückgestellt")}
+            </Status>
+          )}
+          <div className="decision-actions">
+            <Button icon="check" onClick={() => onDecide("confirmed")}>
+              {t("Confirm gap", "Lücke bestätigen")}
+            </Button>
+            <Button icon="close" variant="secondary" onClick={() => onDecide("dismissed")}>
+              {t("Dismiss", "Verwerfen")}
+            </Button>
+            <Button icon="clock" variant="ghost" onClick={() => onDecide("postponed")}>
+              {t("Postpone", "Zurückstellen")}
+            </Button>
+          </div>
+          {decision === "confirmed" ? (
+            <ResourcesPanel student={student} skill={skill.id} published={published} {...common} />
+          ) : (
+            <p className="panel-note">
+              {t(
+                "Confirm the gap to see the AI-recommended practice. You can approve, change or replace each resource before assigning it.",
+                "Bestätigen Sie die Lücke, um die von der KI empfohlene Übung zu sehen. Sie können jedes Material freigeben, ändern oder ersetzen, bevor Sie es zuweisen.",
+              )}
+            </p>
+          )}
+          {onDone && (
+            <Button icon="arrow" variant="ghost" onClick={onDone}>
+              {doneLabel ?? t("Finish review", "Prüfung abschließen")}
+            </Button>
+          )}
+        </>
+      )}
+    </section>
+  );
+}
+
+export function ResourcesPanel({
+  student,
+  skill,
+  published = false,
+  ...common
+}: Common & { student: string; skill: string; published?: boolean }) {
+  const t = makeT(common.language);
+  const language = common.language;
   const s = useClassState();
-  const r = s.resources;
-  const set = (next: Partial<typeof r>) => {
-    updateClassState({ resources: { ...r, ...next } });
-    logActivity("feedback", "Khadija", {
-      EN: "Practice resources updated",
-      DE: "Übungsmaterial aktualisiert",
+  const plan = s.resourcePlans[student] ?? defaultPlan(skill);
+  const options = optionsFor(skill);
+  const skillName = skills.find((k) => k.id === skill)?.name ?? { EN: skill, DE: skill };
+  const [editing, setEditing] = useState<"lesson" | "printable" | null>(null);
+  const set = (next: Partial<ResourcePlan>) =>
+    updateClassState((st) => {
+      const current = st.resourcePlans[student] ?? defaultPlan(skill);
+      return {
+        resourcePlans: {
+          ...st.resourcePlans,
+          [student]: { ...current, ...next, status: current.status === "suggested" ? "suggested" : "changed" },
+        },
+      };
     });
+  const chosen = options.find((o) => o.id === plan.printable);
+  const assign = () => {
+    const resend = plan.status === "changed";
+    updateClassState((st) => ({
+      resourcePlans: { ...st.resourcePlans, [student]: { ...(st.resourcePlans[student] ?? defaultPlan(skill)), status: "assigned" } },
+      gapOutcome: Object.fromEntries(Object.entries(st.gapOutcome).filter(([name]) => name !== student)),
+    }));
+    const list = [
+      plan.video ? t("video", "Video") : null,
+      t("mini lesson + pop quiz", "Mini-Lektion + Kurz-Quiz"),
+      chosen ? chosen.title[language] : null,
+    ].filter(Boolean);
+    logActivity("practice", student, {
+      EN: `${resend ? "Updated practice sent" : "Practice assigned"} for ${skillName.EN}: ${[plan.video ? "video" : null, "mini lesson + pop quiz", chosen?.title.EN].filter(Boolean).join(", ")}`,
+      DE: `${resend ? "Geänderte Übung gesendet" : "Übung zugewiesen"} für ${skillName.DE}: ${[plan.video ? "Video" : null, "Mini-Lektion + Kurz-Quiz", chosen?.title.DE].filter(Boolean).join(", ")}`,
+    }, "teacher");
+    const now = student !== "Khadija" || published;
+    if (student === "Khadija" && published)
+      common.addNotification(
+        "student",
+        resend
+          ? { EN: "Your practice was updated", DE: "Deine Übung wurde geändert" }
+          : { EN: "A practice plan just for you", DE: "Ein Übungsplan nur für dich" },
+        {
+          EN: plan.lessonNote || "Ms. Ashraf chose a short lesson and quiz for you. You can do it!",
+          DE: plan.lessonNote || "Frau Ashraf hat eine kurze Lektion und ein Quiz für dich ausgesucht. Du schaffst das!",
+        },
+        { EN: "Start practice", DE: "Übung starten" },
+        "practice",
+      );
+    common.notify(
+      now
+        ? t(`Practice assigned to ${student}: ${list.join(", ")}.`, `Übung an ${student} zugewiesen: ${list.join(", ")}.`)
+        : t(
+            "Practice approved. Khadija gets it when you publish her results.",
+            "Übung freigegeben. Khadija bekommt sie, wenn Sie ihre Ergebnisse veröffentlichen.",
+          ),
+    );
   };
   return (
     <div className="resources-panel">
-      <p className="kicker">{t("PRACTICE FOR KHADIJA", "ÜBUNG FÜR KHADIJA")}</p>
-      <h3>{t("AI-suggested resources – approve before assigning", "KI-vorgeschlagenes Material – vor dem Zuweisen freigeben")}</h3>
-      <label className="share-toggle">
-        <input type="checkbox" checked={r.video} onChange={(e) => set({ video: e.target.checked })} />
-        <span>
-          <strong>{t("Explainer video (20 s, captions)", "Erklärvideo (20 s, Untertitel)")}</strong>
-          <small>{t("Shown at the start of the mini lesson.", "Wird am Anfang der Mini-Lektion gezeigt.")}</small>
-        </span>
-      </label>
-      <label className="share-toggle locked">
-        <input type="checkbox" checked readOnly disabled />
-        <span>
-          <strong>{t("3-step mini lesson + 3-question pop quiz", "Mini-Lektion in 3 Schritten + Kurz-Quiz mit 3 Fragen")}</strong>
-          <small>{t("Always included so you can check understanding.", "Immer enthalten, damit Sie das Verständnis prüfen können.")}</small>
-        </span>
-      </label>
-      <label className="resource-select">
-        {t("Printable material", "Material zum Ausdrucken")}
-        <select value={r.printable} onChange={(e) => set({ printable: e.target.value as typeof r.printable })}>
-          <option value="worksheet">{t("Comparing fractions worksheet (AI suggestion)", "Arbeitsblatt Brüche vergleichen (KI-Vorschlag)")}</option>
-          <option value="game">{t("Replace with: fraction strips game", "Ersetzen durch: Bruchstreifen-Spiel")}</option>
-          <option value="none">{t("No printable", "Kein Ausdruck")}</option>
-        </select>
-      </label>
+      <p className="kicker">{t(`PRACTICE FOR ${student.toUpperCase()}`, `ÜBUNG FÜR ${student.toUpperCase()}`)}</p>
+      <h3>
+        {t(`AI-recommended for “${skillName.EN}” – approve, change or replace`, `KI-Empfehlung für „${skillName.DE}“ – freigeben, ändern oder ersetzen`)}
+      </h3>
+      <Status type={plan.status === "assigned" ? "good" : plan.status === "changed" ? "warn" : "neutral"}>
+        {plan.status === "assigned"
+          ? student === "Khadija" && !published
+            ? t("Approved · sent when you publish", "Freigegeben · wird beim Veröffentlichen gesendet")
+            : t("Assigned", "Zugewiesen")
+          : plan.status === "changed"
+            ? t("Changed since you assigned it", "Seit dem Zuweisen geändert")
+            : t("AI suggestion · not assigned yet", "KI-Vorschlag · noch nicht zugewiesen")}
+      </Status>
+
+      <div className="resource-item">
+        <label className="share-toggle">
+          <input type="checkbox" checked={plan.video} onChange={(e) => set({ video: e.target.checked })} />
+          <span>
+            <strong>{t("Explainer video (20 s, captions)", "Erklärvideo (20 s, Untertitel)")}</strong>
+            <small>
+              {plan.video
+                ? t("Included · shown at the start of the mini lesson.", "Enthalten · wird am Anfang der Mini-Lektion gezeigt.")
+                : t("Removed by you.", "Von Ihnen entfernt.")}
+            </small>
+          </span>
+        </label>
+      </div>
+
+      <div className="resource-item">
+        <div className="resource-head">
+          <span>
+            <strong>{t("3-step mini lesson + 3-question pop quiz", "Mini-Lektion in 3 Schritten + Kurz-Quiz mit 3 Fragen")}</strong>
+            <small>{t("Always included so you can check understanding.", "Immer enthalten, damit Sie das Verständnis prüfen können.")}</small>
+          </span>
+          <button type="button" className="link-button" onClick={() => setEditing(editing === "lesson" ? null : "lesson")}>
+            <Icon name="edit" size={14} /> {editing === "lesson" ? t("Done", "Fertig") : t("Modify", "Ändern")}
+          </button>
+        </div>
+        {plan.lessonNote && editing !== "lesson" && <p className="resource-note">“{plan.lessonNote}”</p>}
+        {editing === "lesson" && (
+          <label className="resource-edit">
+            {t("Your note at the start of the lesson", "Ihre Notiz am Anfang der Lektion")}
+            <textarea
+              rows={2}
+              value={plan.lessonNote}
+              placeholder={t("e.g. Draw both fractions before you choose < or >.", "z. B. Male beide Brüche, bevor du < oder > wählst.")}
+              onChange={(e) => set({ lessonNote: e.target.value })}
+            />
+          </label>
+        )}
+      </div>
+
+      <div className="resource-item">
+        <div className="resource-head">
+          <span>
+            <strong>{t("Printable material", "Material zum Ausdrucken")}</strong>
+            <small>{t("Choose another one to replace the AI suggestion.", "Wählen Sie ein anderes, um den KI-Vorschlag zu ersetzen.")}</small>
+          </span>
+          {plan.printable !== "none" && (
+            <button type="button" className="link-button" onClick={() => setEditing(editing === "printable" ? null : "printable")}>
+              <Icon name="edit" size={14} /> {editing === "printable" ? t("Done", "Fertig") : t("Modify", "Ändern")}
+            </button>
+          )}
+        </div>
+        <div className="resource-options" role="radiogroup" aria-label={t("Printable material", "Material zum Ausdrucken")}>
+          {[...options, null].map((option, index) => {
+            const id = option?.id ?? "none";
+            return (
+              <label key={id} className={plan.printable === id ? "selected" : ""}>
+                <input type="radio" name={`printable-${student}`} checked={plan.printable === id} onChange={() => set({ printable: id })} />
+                <span>
+                  <strong>
+                    {option ? option.title[language] : t("No printable", "Kein Ausdruck")}
+                    {index === 0 && <em>{t("AI suggestion", "KI-Vorschlag")}</em>}
+                    {index > 0 && option && plan.printable === id && <em className="replaced">{t("Replaces AI suggestion", "Ersetzt KI-Vorschlag")}</em>}
+                  </strong>
+                  {option && <small>{option.detail[language]}</small>}
+                </span>
+              </label>
+            );
+          })}
+        </div>
+        {plan.printableNote && editing !== "printable" && <p className="resource-note">“{plan.printableNote}”</p>}
+        {editing === "printable" && (
+          <label className="resource-edit">
+            {t("Change the instructions on the printable", "Anleitung auf dem Ausdruck ändern")}
+            <textarea
+              rows={2}
+              value={plan.printableNote}
+              placeholder={t("e.g. Only do the first 4 pairs.", "z. B. Nur die ersten 4 Paare machen.")}
+              onChange={(e) => set({ printableNote: e.target.value })}
+            />
+          </label>
+        )}
+      </div>
+
+      <div className="decision-actions">
+        <Button icon="check" disabled={plan.status === "assigned"} onClick={assign}>
+          {plan.status === "changed"
+            ? t(`Send changes to ${student}`, `Änderungen an ${student} senden`)
+            : plan.status === "assigned"
+              ? t("Assigned", "Zugewiesen")
+              : t(`Approve and assign to ${student}`, `Freigeben und ${student} zuweisen`)}
+        </Button>
+        {plan.status !== "suggested" && (
+          <Button
+            icon="close"
+            variant="ghost"
+            onClick={() => {
+              updateClassState((st) => ({ resourcePlans: { ...st.resourcePlans, [student]: defaultPlan(skill) } }));
+              setEditing(null);
+              common.notify(t("Back to the AI suggestion.", "Zurück zum KI-Vorschlag."));
+            }}
+          >
+            {t("Reset to AI suggestion", "Auf KI-Vorschlag zurücksetzen")}
+          </Button>
+        )}
+      </div>
     </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// C33 – Revision planning from class-wide gaps and the skill tree
+// ---------------------------------------------------------------------------
+const skillByName = (name: string) =>
+  skills.find((k) => k.name.EN === name)?.id ?? (/word problem/i.test(name) ? "words" : null);
+const skillByTask = (task: string) =>
+  /compare/i.test(task)
+    ? "compare"
+    : /shade|equal/i.test(task)
+      ? "parts"
+      : /share|apples/i.test(task)
+        ? "working"
+        : /÷/.test(task)
+          ? "division"
+          : /\+/.test(task)
+            ? "add"
+            : /bus|word/i.test(task)
+              ? "words"
+              : /×/.test(task)
+                ? "multi"
+                : null;
+
+export function RevisionPlanner({
+  classId,
+  summary,
+  language,
+  notify,
+}: {
+  classId: ClassId;
+  summary: ClassSummary;
+  language: Lang;
+  notify: (m: string) => void;
+}) {
+  const t = makeT(language);
+  const s = useClassState();
+  const plan = s.revisionPlans[classId] ?? [];
+  const setPlan = (next: string[]) => updateClassState((st) => ({ revisionPlans: { ...st.revisionPlans, [classId]: next } }));
+  const suggestions = skills
+    .map((k) => {
+      const concept = summary.concepts.find((c) => skillByName(c.name.EN) === k.id);
+      const missed = summary.missed.filter((m) => skillByTask(m.task.EN) === k.id);
+      const flaggedCount = concept?.students ?? (classId === "4B" ? studentsFor(k.id).length : 0);
+      const share = Math.round((flaggedCount / summary.students) * 100);
+      // The skill tree's mastery only exists for 4B; other classes use the class summary.
+      const mastery = classId === "4B" ? k.mastery : null;
+      const worst = missed.sort((a, b) => b.wrong - a.wrong)[0];
+      const score = share + (mastery === null ? 0 : (100 - mastery) * 0.6) + (worst ? worst.wrong * 0.5 : 0);
+      return { skill: k, share, flaggedCount, mastery, worst, mistake: concept?.mistake ?? k.mistake, score };
+    })
+    .filter((x) => x.flaggedCount > 0 || x.worst)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 4);
+  const move = (id: string, step: number) => {
+    const i = plan.indexOf(id);
+    const j = i + step;
+    if (i < 0 || j < 0 || j >= plan.length) return;
+    const next = [...plan];
+    [next[i], next[j]] = [next[j], next[i]];
+    setPlan(next);
+  };
+  const minutes = plan.length * 12;
+  return (
+    <article className="panel revision-panel">
+      <div className="panel-head">
+        <div>
+          <p className="kicker">
+            {t(`REVISION PLANNING · GRADE ${classId}`, `WIEDERHOLUNGSPLANUNG · KLASSE ${classId}`)}
+          </p>
+          <h2>{t("Suggested topics for the next revision lesson", "Vorgeschlagene Themen für die nächste Wiederholungsstunde")}</h2>
+        </div>
+        <Status type="neutral">{t("AI suggestion – you decide", "KI-Vorschlag – Sie entscheiden")}</Status>
+      </div>
+      <p className="panel-note">
+        {classId === "4B"
+          ? t(
+              "Ranked by how many students share the gap, the most-missed questions and skill-tree mastery.",
+              "Sortiert nach Anzahl betroffener Kinder, am häufigsten falschen Aufgaben und Kompetenzstand im Kompetenzbaum.",
+            )
+          : t(
+              "Ranked by how many students share the gap and the most-missed questions in this class.",
+              "Sortiert nach Anzahl betroffener Kinder und den am häufigsten falschen Aufgaben dieser Klasse.",
+            )}
+      </p>
+      {suggestions.map((x, index) => (
+        <div className="revision-row" key={x.skill.id}>
+          <em>{index + 1}</em>
+          <span>
+            <strong>{x.skill.name[language]}</strong>
+            <small>
+              {[
+                x.flaggedCount > 0 ? t(`${x.flaggedCount} of ${summary.students} students (${x.share}%)`, `${x.flaggedCount} von ${summary.students} Kindern (${x.share} %)`) : null,
+                x.worst ? t(`Q${x.worst.q} ${x.worst.wrong}% wrong`, `A${x.worst.q} ${x.worst.wrong} % falsch`) : null,
+                x.mastery !== null ? t(`${x.mastery}% secure in the skill tree`, `${x.mastery} % sicher im Kompetenzbaum`) : null,
+              ]
+                .filter(Boolean)
+                .join(" · ")}
+            </small>
+            <small>
+              {t("Common mistake:", "Häufiger Fehler:")} {x.mistake[language]} · {t("Activity:", "Aktivität:")} {x.skill.activity[language]}
+            </small>
+          </span>
+          {plan.includes(x.skill.id) ? (
+            <Button icon="close" variant="ghost" onClick={() => setPlan(plan.filter((id) => id !== x.skill.id))}>
+              {t("Remove", "Entfernen")}
+            </Button>
+          ) : (
+            <Button
+              icon="check"
+              variant="secondary"
+              onClick={() => {
+                setPlan([...plan, x.skill.id]);
+                notify(t(`${x.skill.name.EN} added to the ${classId} revision plan.`, `${x.skill.name.DE} zum Wiederholungsplan ${classId} hinzugefügt.`));
+              }}
+            >
+              {t("Add", "Hinzufügen")}
+            </Button>
+          )}
+        </div>
+      ))}
+      <div className="revision-plan">
+        <h3>
+          {t(`Revision lesson plan · Grade ${classId}`, `Wiederholungsstunde · Klasse ${classId}`)}
+          {plan.length > 0 && <small> · {t(`about ${minutes} minutes`, `etwa ${minutes} Minuten`)}</small>}
+        </h3>
+        {plan.length === 0 ? (
+          <p className="panel-note">{t("No topics in the plan yet. Add suggested topics above.", "Noch keine Themen im Plan. Fügen Sie oben Vorschläge hinzu.")}</p>
+        ) : (
+          <ol>
+            {plan.map((id, i) => {
+              const k = skills.find((x) => x.id === id);
+              if (!k) return null;
+              return (
+                <li key={id}>
+                  <span>
+                    <strong>{k.name[language]}</strong>
+                    <small>
+                      {t("~12 min", "~12 Min.")} · {k.activity[language]}
+                    </small>
+                  </span>
+                  <span className="plan-moves">
+                    <button type="button" disabled={i === 0} onClick={() => move(id, -1)} aria-label={t(`Move ${k.name.EN} up`, `${k.name.DE} nach oben`)}>
+                      ↑
+                    </button>
+                    <button type="button" disabled={i === plan.length - 1} onClick={() => move(id, 1)} aria-label={t(`Move ${k.name.EN} down`, `${k.name.DE} nach unten`)}>
+                      ↓
+                    </button>
+                    <button type="button" onClick={() => setPlan(plan.filter((x) => x !== id))} aria-label={t(`Remove ${k.name.EN}`, `${k.name.DE} entfernen`)}>
+                      ×
+                    </button>
+                  </span>
+                </li>
+              );
+            })}
+          </ol>
+        )}
+      </div>
+    </article>
   );
 }
 
@@ -1921,6 +2754,11 @@ export function MessagesPage({ onReview, onNote, ...common }: Common & { onRevie
             "Danke für Ihre Nachricht. Khadija macht die Bruchübung; 10 Minuten mit Zeichnungen zu Hause helfen.",
           ),
           t("Happy to talk – would Tuesday after school suit you?", "Gerne im Gespräch – passt Ihnen Dienstag nach der Schule?"),
+        ]
+      : selected?.kind === "note"
+      ? [
+          t("Did the practice help? Tell me what was hard.", "Hat die Übung geholfen? Sag mir, was schwer war."),
+          t("Well done for finishing it!", "Gut gemacht, dass du es geschafft hast!"),
         ]
       : selected?.kind === "report"
       ? [
@@ -1952,6 +2790,20 @@ export function MessagesPage({ onReview, onNote, ...common }: Common & { onRevie
       setReply("");
       return;
     }
+    if (selected.kind === "note") {
+      logActivity("feedback", selected.student, { EN: `Follow-up note sent: “${text}”`, DE: `Nachtrag gesendet: „${text}“` }, "teacher");
+      if (selected.student === DEMO_STUDENT)
+        common.addNotification(
+          "student",
+          { EN: "New note from Ms. Ashraf", DE: "Neue Notiz von Frau Ashraf" },
+          { EN: text, DE: text },
+          { EN: "Read note", DE: "Notiz lesen" },
+          "messages",
+        );
+      common.notify(t(`Sent to ${selected.student}.`, `An ${selected.student} gesendet.`));
+      setReply("");
+      return;
+    }
     logActivity(selected.kind === "report" ? "report" : "question", selected.student, {
       EN: resolve ? "Teacher resolved the report" : "Teacher replied",
       DE: resolve ? "Meldung von der Lehrerin erledigt" : "Lehrerin hat geantwortet",
@@ -1975,7 +2827,12 @@ export function MessagesPage({ onReview, onNote, ...common }: Common & { onRevie
         <div>
           <p className="kicker">{t("STUDENT COMMUNICATION", "KOMMUNIKATION MIT KINDERN")}</p>
           <h1>{t("Messages", "Nachrichten")}</h1>
-          <p>{t("Questions and error reports from students, and notes you sent.", "Fragen und Fehlermeldungen der Kinder sowie Ihre Notizen.")}</p>
+          <p>
+            {t(
+              "Questions and error reports from students, and notes and learning recommendations you sent to any student.",
+              "Fragen und Fehlermeldungen der Kinder sowie Notizen und Lernempfehlungen, die Sie an Kinder gesendet haben.",
+            )}
+          </p>
         </div>
         <Button icon="message" onClick={() => onNote("Khadija")}>
           {t("New note", "Neue Notiz")}
@@ -2041,7 +2898,7 @@ export function MessagesPage({ onReview, onNote, ...common }: Common & { onRevie
                   {t("Open the exam review", "Prüfung der Arbeit öffnen")}
                 </Button>
               )}
-              {selected.kind !== "note" && (
+              {(
                 <>
                   <div className="template-chips">
                     {suggestions.map((item) => (
@@ -2051,7 +2908,7 @@ export function MessagesPage({ onReview, onNote, ...common }: Common & { onRevie
                     ))}
                   </div>
                   <label className="feedback-field">
-                    {t("Your reply", "Ihre Antwort")}
+                    {selected.kind === "note" ? t("Add to this note", "Zu dieser Notiz ergänzen") : t("Your reply", "Ihre Antwort")}
                     <textarea rows={3} value={reply} onChange={(e) => setReply(e.target.value)} />
                   </label>
                   <div className="decision-actions">
@@ -2164,114 +3021,183 @@ const aiTags: Record<number, string> = { 3: "parts", 5: "working", 7: "denominat
 
 export function GradeBreakdown({
   language,
+  student,
+  focusQ,
   q2Mark,
   q2Confirmed,
   answer,
+  onOverride,
 }: {
   language: Lang;
-  q2Mark: number;
-  q2Confirmed: boolean;
-  answer: string;
+  /** Whose paper this is. */
+  student: string;
+  /** The question this review step is about (shown first and opened). */
+  focusQ: number;
+  /** Khadija's Q2 is held in the review itself. */
+  q2Mark?: number;
+  q2Confirmed?: boolean;
+  answer?: string;
+  onOverride: (n: number) => void;
 }) {
   const t = makeT(language);
   const s = useClassState();
-  const marks = [2, q2Mark, 0, 3, 2, 3, 0, 4];
-  const confidence = [96, 61, 89, 94, 74, 97, 91, 95];
-  const rows = s.scheme
-    .map((item, i) => ({ ...item, mark: marks[i], confidence: confidence[i] }))
-    .sort((a, b) => a.confidence - b.confidence);
+  const rosterStudent = roster.find((r) => r.name === student) ?? roster[0];
+  const isKhadija = student === "Khadija";
+  const [open, setOpen] = useState<number | null>(focusQ);
+  const rows = quiz4Answers(rosterStudent, s).map((a) => {
+    if (isKhadija && a.n === 2) {
+      const v = specOf(2).variants[answer?.trim() === "528" ? "full" : "none"];
+      return {
+        ...a,
+        ...v,
+        answer: answer ?? v.answer,
+        mark: q2Mark ?? v.ai,
+        source: q2Confirmed ? ("teacher" as const) : ("ai" as const),
+      };
+    }
+    return { ...a, mark: markOf(rosterStudent, a.n, s), source: markSource(rosterStudent, a.n, s) };
+  });
+  const total = rows.reduce((sum, r) => sum + r.mark, 0);
+  const pct = Math.round((total / 25) * 100);
+  const sorted = [...rows].sort((a, b) => Number(b.n === focusQ) - Number(a.n === focusQ) || a.confidence - b.confidence);
   return (
     <div className="grade-breakdown">
-      <p className="kicker">{t("WHOLE EXAM · AI MARKS", "GANZE ARBEIT · KI-BEWERTUNG")}</p>
-      <h3>{t("Least certain first", "Unsicherste zuerst")}</h3>
+      <p className="kicker">{t("WHOLE EXAM · AI MARKS AND REASONS", "GANZE ARBEIT · KI-BEWERTUNG UND BEGRÜNDUNG")}</p>
+      <h3>{t("Every question, least certain first", "Alle Aufgaben, unsicherste zuerst")}</h3>
       <p className="breakdown-total">
-        {(() => {
-          const total = marks.reduce((sum, m) => sum + m, 0);
-          const pct = Math.round((total / 25) * 100);
-          return q2Confirmed
-            ? t(`Total ${total}/25 (${pct}%) · confirmed by you`, `Summe ${total}/25 (${pct} %) · von Ihnen bestätigt`)
-            : t(`AI draft total ${total}/25 (${pct}%) · not confirmed yet`, `KI-Entwurf gesamt ${total}/25 (${pct} %) · noch nicht bestätigt`);
-        })()}
+        {t(`Total ${total}/25 (${pct}%)`, `Summe ${total}/25 (${pct} %)`)}
+        {" · "}
+        {rows.some((r) => r.source === "ai")
+          ? t(
+              `${rows.filter((r) => r.source === "ai").length} AI marks not changed by you`,
+              `${rows.filter((r) => r.source === "ai").length} KI-Bewertungen nicht von Ihnen geändert`,
+            )
+          : t("all marks set by you", "alle Bewertungen von Ihnen")}
       </p>
-      <div className="breakdown-table" role="table">
-        {rows.map((row) => {
+      <div className="breakdown-table explain" role="table">
+        {sorted.map((row) => {
           const level = row.confidence < 70 ? "warn" : row.confidence < 90 ? "neutral" : "good";
+          const spec = specOf(row.n);
+          const scheme = s.scheme[row.n - 1];
+          const expanded = open === row.n;
           return (
-            <div className="breakdown-row" role="row" key={row.n}>
-              <span>{t("Q", "A")}{row.n}</span>
-              <b>
-                {row.mark}/{row.marks}
-              </b>
-              <Status type={level}>
-                {row.confidence}% ·{" "}
-                {level === "warn"
-                  ? t("Needs your decision", "Ihre Entscheidung nötig")
-                  : level === "neutral"
-                    ? t("Check", "Prüfen")
-                    : t("High confidence", "Hohe Sicherheit")}
-              </Status>
-              <small>
-                {row.n === 2
-                  ? q2Confirmed
-                    ? t("Confirmed by you", "Von Ihnen bestätigt")
-                    : t("Waiting for you", "Wartet auf Sie")
-                  : t("Included in the total", "In der Summe enthalten")}
-              </small>
+            <div className={`breakdown-item ${expanded ? "open" : ""}`} key={row.n}>
+              <div className="breakdown-row" role="row">
+                <span>
+                  {t("Q", "A")}
+                  {row.n}
+                </span>
+                <span className="breakdown-answer">
+                  <small>{spec.title[language]}</small>
+                  <b>“{row.answer}”</b>
+                </span>
+                <b>
+                  {row.mark}/{row.out}
+                </b>
+                <Status type={level}>
+                  {row.confidence}% ·{" "}
+                  {level === "warn"
+                    ? t("Needs your decision", "Ihre Entscheidung nötig")
+                    : level === "neutral"
+                      ? t("Check", "Prüfen")
+                      : t("High confidence", "Hohe Sicherheit")}
+                </Status>
+                <small>
+                  {row.source === "teacher"
+                    ? t("Set by you", "Von Ihnen gesetzt")
+                    : row.source === "rule"
+                      ? t("Bulk correction", "Sammelkorrektur")
+                      : row.n === focusQ
+                        ? t("Waiting for you", "Wartet auf Sie")
+                        : t("AI mark", "KI-Bewertung")}
+                </small>
+                <span className="breakdown-actions">
+                  <button
+                    type="button"
+                    className="link-button"
+                    aria-expanded={expanded}
+                    onClick={() => setOpen(expanded ? null : row.n)}
+                  >
+                    {expanded ? t("Hide why", "Begründung ausblenden") : t("Why?", "Warum?")}
+                  </button>
+                  <button type="button" className="link-button" onClick={() => onOverride(row.n)}>
+                    {t("Override", "Ändern")}
+                  </button>
+                </span>
+              </div>
+              {expanded && (
+                <div className="breakdown-why">
+                  <p>
+                    <Icon name="spark" size={16} /> {row.reason[language]}
+                  </p>
+                  <ul className="criteria-list">
+                    {row.criteria.map((cr) => (
+                      <li key={cr.text.EN}>
+                        <Icon name={cr.met ? "check" : "close"} size={16} /> {cr.text[language]} –{" "}
+                        {cr.met ? cr.marks : 0}/{cr.marks}
+                      </li>
+                    ))}
+                  </ul>
+                  <dl className="why-facts">
+                    <div>
+                      <dt>{t("Model answer", "Musterlösung")}</dt>
+                      <dd>{scheme?.model ?? spec.model}</dd>
+                    </div>
+                    <div>
+                      <dt>{t("Scheme rule", "Regel")}</dt>
+                      <dd>{scheme?.rule[language]}</dd>
+                    </div>
+                    <div>
+                      <dt>{t("AI mark", "KI-Bewertung")}</dt>
+                      <dd>
+                        {row.ai}/{row.out}
+                        {row.mark !== row.ai && ` → ${t("now", "jetzt")} ${row.mark}/${row.out}`}
+                      </dd>
+                    </div>
+                  </dl>
+                </div>
+              )}
             </div>
           );
         })}
       </div>
-      <p className="kicker">{t("WHY THE AI GAVE Q2 THIS MARK", "WARUM DIE KI A2 SO BEWERTET")}</p>
-      <ul className="criteria-list">
-        <li>
-          <Icon name="check" size={16} /> {t("Method: 132 × 4 set out correctly – 1 mark", "Rechenweg: 132 × 4 richtig angesetzt – 1 Punkt")}
-        </li>
-        <li>
-          <Icon name={answer.trim() === "528" ? "check" : "close"} size={16} />{" "}
-          {answer.trim() === "528"
-            ? t("Answer 528 matches the model answer – 2 marks", "Ergebnis 528 entspricht der Musterlösung – 2 Punkte")
-            : t(
-                `Answer ${answer} does not match the model answer 528 – 0 marks`,
-                `Ergebnis ${answer} entspricht nicht der Musterlösung 528 – 0 Punkte`,
-              )}
-        </li>
-        <li>
-          <Icon name="idea" size={16} /> {t("Scheme rule: 1 for method, 2 for answer (method mark needs a correct answer)", "Regel: 1 für den Rechenweg, 2 für das Ergebnis (Rechenwegpunkt nur mit richtigem Ergebnis)")}
-        </li>
-      </ul>
-      <p className="kicker">{t("MISTAKE TAGS", "FEHLERKATEGORIEN")}</p>
-      {[3, 5, 7].map((n) => {
-        const current = s.mistakeTags[n] ?? aiTags[n];
-        return (
-          <label className="tag-row" key={n}>
-            <span>
-              {t("Q", "A")}
-              {n}
-            </span>
-            <select
-              value={current}
-              onChange={(e) => {
-                const value = e.target.value;
-                updateClassState((st) => ({ mistakeTags: { ...st.mistakeTags, [n]: value } }));
-                const label = mistakeTypes.find((m) => m.id === value)?.label;
-                logActivity("mark", "Khadija", {
-                  EN: `Quiz 4 · Q${n}: mistake tagged “${label?.EN}”`,
-                  DE: `Quiz 4 · A${n}: Fehler markiert als „${label?.DE}“`,
-                });
-              }}
-            >
-              {mistakeTypes.map((m) => (
-                <option key={m.id} value={m.id}>
-                  {m.label[language]}
-                </option>
-              ))}
-            </select>
-            <Status type={current === aiTags[n] ? "neutral" : "good"}>
-              {current === aiTags[n] ? t("AI suggestion", "KI-Vorschlag") : t("Edited by you", "Von Ihnen geändert")}
-            </Status>
-          </label>
-        );
-      })}
+      {isKhadija && (
+        <>
+          <p className="kicker">{t("MISTAKE TAGS", "FEHLERKATEGORIEN")}</p>
+          {[3, 5, 7].map((n) => {
+            const current = s.mistakeTags[n] ?? aiTags[n];
+            return (
+              <label className="tag-row" key={n}>
+                <span>
+                  {t("Q", "A")}
+                  {n}
+                </span>
+                <select
+                  value={current}
+                  onChange={(e) => {
+                    const value = e.target.value;
+                    updateClassState((st) => ({ mistakeTags: { ...st.mistakeTags, [n]: value } }));
+                    const label = mistakeTypes.find((m) => m.id === value)?.label;
+                    logActivity("mark", "Khadija", {
+                      EN: `Quiz 4 · Q${n}: mistake tagged “${label?.EN}”`,
+                      DE: `Quiz 4 · A${n}: Fehler markiert als „${label?.DE}“`,
+                    });
+                  }}
+                >
+                  {mistakeTypes.map((m) => (
+                    <option key={m.id} value={m.id}>
+                      {m.label[language]}
+                    </option>
+                  ))}
+                </select>
+                <Status type={current === aiTags[n] ? "neutral" : "good"}>
+                  {current === aiTags[n] ? t("AI suggestion", "KI-Vorschlag") : t("Edited by you", "Von Ihnen geändert")}
+                </Status>
+              </label>
+            );
+          })}
+        </>
+      )}
     </div>
   );
 }
@@ -2431,10 +3357,12 @@ export function ClassPerformance({
   khadija,
   language,
   onOpenStudent,
+  notify,
 }: {
   khadija: KhadijaLive;
   language: Lang;
   onOpenStudent: (name: string) => void;
+  notify: (m: string) => void;
 }) {
   const t = makeT(language);
   const s = useClassState();
@@ -2646,17 +3574,14 @@ export function ClassPerformance({
                 <small>{x.focus[language]}</small>
               </span>
               <b>{x.score === null ? t("Quiz 4 not marked", "Quiz 4 nicht bewertet") : `${x.score}%`}</b>
-              {cls === "4B" ? (
-                <Button icon="person" variant="ghost" onClick={() => onOpenStudent(x.name)}>
-                  {t("Open record", "Akte öffnen")}
-                </Button>
-              ) : (
-                <span />
-              )}
+              <Button icon="person" variant="ghost" onClick={() => onOpenStudent(x.name)}>
+                {t("Open record", "Akte öffnen")}
+              </Button>
             </div>
           ))}
         </article>
       </section>
+      <RevisionPlanner classId={cls} summary={c} language={language} notify={notify} />
     </>
   );
 }
@@ -2694,17 +3619,17 @@ export function QuizMonitor({ khadija, ...common }: Common & Live) {
     .filter((r) => practiceBefore[r.name])
     .map((r) => {
       const info = practiceBefore[r.name];
-      const state =
-        r.name !== "Khadija"
-          ? r.practice
-          : khadija.practiced
-            ? "done"
-            : khadija.published && khadija.redFlagDecision === "confirmed"
-              ? "pending"
-              : "none";
-      const score = r.name === "Khadija" ? khadija.practiceScore : (r.quizScore ?? null);
-      const after = state === "done" && score !== null ? Math.round((score / 3) * 100) : null;
-      return { name: r.name, state, score, after, ...info };
+      // Every attempt is kept, so the improvement after practice is on record.
+      const attempts = s.popQuizzes[r.name] ?? [];
+      const latest = attempts[attempts.length - 1];
+      const assigned =
+        s.resourcePlans[r.name]?.status === "assigned" ||
+        (r.name === "Khadija" ? khadija.published && khadija.redFlagDecision === "confirmed" : r.practice === "pending");
+      const state = latest ? "done" : assigned ? "pending" : "none";
+      const score = latest?.score ?? null;
+      const after = latest ? Math.round((latest.score / 3) * 100) : null;
+      const previous = attempts.length > 1 ? Math.round((attempts[attempts.length - 2].score / 3) * 100) : null;
+      return { name: r.name, state, score, after, previous, attempts, ...info };
     });
   const done = rows.filter((r) => r.after !== null);
   const avg = (xs: number[]) => (xs.length ? Math.round(xs.reduce((a, b) => a + b, 0) / xs.length) : 0);
@@ -2802,6 +3727,13 @@ export function QuizMonitor({ khadija, ...common }: Common & Live) {
                   {row.label[common.language]} ({row.before}%) →{" "}
                   {row.after === null ? "—" : `${row.score}/3 (${row.after}%)`}
                 </small>
+                {row.attempts.length > 0 && (
+                  <small className="attempt-history">
+                    {row.attempts
+                      .map((a) => `${t("Try", "Versuch")} ${a.round}: ${a.score}/3 · ${a.at[common.language]}`)
+                      .join("  →  ")}
+                  </small>
+                )}
               </span>
               <span>
                 {row.state !== "done" ? (
@@ -2809,11 +3741,20 @@ export function QuizMonitor({ khadija, ...common }: Common & Live) {
                     {row.state === "pending" ? t("Not done yet", "Noch nicht erledigt") : t("Not assigned yet", "Noch nicht zugewiesen")}
                   </Status>
                 ) : (
-                  <Status type={(change ?? 0) >= 50 ? "good" : (change ?? 0) > 0 ? "neutral" : "warn"}>
-                    {(change ?? 0) > 0
-                      ? t(`Improved +${change} points`, `Verbessert +${change} Punkte`)
-                      : t("No improvement yet", "Noch keine Verbesserung")}
-                  </Status>
+                  <span className="effect-cell">
+                    <Status type={(change ?? 0) >= 50 ? "good" : (change ?? 0) > 0 ? "neutral" : "warn"}>
+                      {(change ?? 0) > 0
+                        ? t(`Improved +${change} points`, `Verbessert +${change} Punkte`)
+                        : t("No improvement yet", "Noch keine Verbesserung")}
+                    </Status>
+                    {row.previous !== null && row.after !== null && (
+                      <small>
+                        {row.after - row.previous >= 0
+                          ? t(`+${row.after - row.previous} since the last try`, `+${row.after - row.previous} seit dem letzten Versuch`)
+                          : t(`${row.after - row.previous} since the last try`, `${row.after - row.previous} seit dem letzten Versuch`)}
+                      </small>
+                    )}
+                  </span>
                 )}
               </span>
               <span className="monitor-action">
@@ -2932,10 +3873,17 @@ export function BulkUpload(common: Common) {
               : t("Low resolution", "Geringe Auflösung");
   const importAll = () => {
     const names = [...new Set(files.map((f) => f.student))];
-    updateClassState((st) => ({
-      bulkUploaded: st.bulkUploaded || names.includes("Judy"),
-      uploadedScans: [...new Set([...st.uploadedScans, ...names])],
-    }));
+    updateClassState((st) => {
+      const scanFiles = { ...st.scanFiles };
+      files.forEach((f) => {
+        scanFiles[f.student] = [...(scanFiles[f.student] ?? []), { name: f.name, url: f.url }];
+      });
+      return {
+        bulkUploaded: st.bulkUploaded || names.includes("Judy"),
+        uploadedScans: [...new Set([...st.uploadedScans, ...names])],
+        scanFiles,
+      };
+    });
     names.forEach((name) => {
       const count = files.filter((f) => f.student === name).length;
       logActivity("submitted", name, {
@@ -3074,3 +4022,159 @@ export function BulkUpload(common: Common) {
   );
 }
 
+
+// ---------------------------------------------------------------------------
+// C5 – Original exam viewer: the student's own paper, for every student
+// ---------------------------------------------------------------------------
+
+/** The student's own photo of their Quiz 4 answer sheet (drawn, since the demo has no real photos). */
+function studentPaper(student: RosterStudent) {
+  const canvas = document.createElement("canvas");
+  canvas.width = 600;
+  canvas.height = 820;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return null;
+  ctx.fillStyle = "#fbfaf6";
+  ctx.fillRect(0, 0, 600, 820);
+  ctx.fillStyle = "#2b2b2b";
+  ctx.font = "bold 32px sans-serif";
+  ctx.fillText("Quiz 4: Fractions", 40, 70);
+  ctx.font = "26px sans-serif";
+  ctx.fillText(`Name: ${student.name}`, 40, 120);
+  ctx.fillText("Grade 4B", 420, 120);
+  const q5 =
+    student.q5.group === "working" ? "20 ÷ 5 = 4 each" : student.q5.group === "wrong" ? "5 each" : "4 each";
+  const answers =
+    student.name === "Khadija"
+      ? questions.map((q) => `${q.n}. ${q.title} → ${q.answer}`)
+      : [
+          "1. 24 × 6 = 144",
+          "2. 132 × 4 = 528",
+          `3. Shade 3/4: ${student.focus === "compare" ? "2/4 shaded" : "3/4 shaded"}`,
+          "4. 1/2 + 1/4 = 3/4",
+          `5. 20 apples: ${q5}`,
+          "6. 450 ÷ 5 = 90",
+          `7. ${student.focus === "compare" ? "2/3 < 3/5" : "2/3 > 3/5"}`,
+          "8. 48 seats",
+        ];
+  ctx.font = "italic 25px 'Comic Sans MS', 'Segoe Print', cursive";
+  ctx.strokeStyle = "rgba(43,43,43,0.25)";
+  ctx.lineWidth = 2;
+  answers.forEach((line, i) => {
+    const y = 190 + i * 78;
+    ctx.fillStyle = "#1f3a8a";
+    ctx.fillText(line, 44, y);
+    ctx.beginPath();
+    ctx.moveTo(40, y + 16);
+    ctx.lineTo(560, y + 16);
+    ctx.stroke();
+  });
+  return canvas.toDataURL("image/jpeg", 0.85);
+}
+
+export function ScanViewer({
+  student,
+  status,
+  onClose,
+  onReview,
+  ...common
+}: Common & {
+  student: string;
+  status: { type: "good" | "warn" | "bad" | "neutral"; label: string; action: boolean };
+  onClose: () => void;
+  onReview: () => void;
+}) {
+  const t = makeT(common.language);
+  const s = useClassState();
+  useEscape(true, onClose);
+  const rosterStudent = roster.find((r) => r.name === student);
+  const ownPhoto = useMemo(
+    () => (rosterStudent && student !== "Judy" ? studentPaper(rosterStudent) : null),
+    [rosterStudent, student],
+  );
+  const sent = s.studentScans[student];
+  const pages = [
+    ...(sent?.length
+      ? sent.map((f) => ({
+          name: f.name,
+          // Demo sample photos have no image; show the drawn paper instead of a PDF box.
+          url: f.url ?? (f.name.toLowerCase().endsWith(".pdf") ? null : ownPhoto),
+          byTeacher: false,
+        }))
+      : ownPhoto
+        ? [{ name: t("Sent by the student", "Vom Kind gesendet"), url: ownPhoto, byTeacher: false }]
+        : []),
+    ...(s.scanFiles[student] ?? []).map((f) => ({ name: f.name, url: f.url, byTeacher: true })),
+  ];
+  const [index, setIndex] = useState(0);
+  const [zoom, setZoom] = useState(false);
+  const page = pages[Math.min(index, pages.length - 1)];
+  return (
+    <div className="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="scan-viewer-title">
+      <div className="modal scan-viewer">
+        <button className="modal-close" onClick={onClose} aria-label={t("Close", "Schließen")} title={t("Close", "Schließen")}>
+          <Icon name="close" />
+        </button>
+        <p className="kicker">{t("ORIGINAL SCAN · QUIZ 4", "ORIGINALSCAN · QUIZ 4")}</p>
+        <h2 id="scan-viewer-title">{student}</h2>
+        <Status type={status.type}>{status.label}</Status>
+        {pages.length > 1 && (
+          <div className="scan-pages" role="tablist" aria-label={t("Pages", "Seiten")}>
+            {pages.map((p, i) => (
+              <button
+                key={`${p.name}-${i}`}
+                role="tab"
+                aria-selected={i === index}
+                className={i === index ? "active" : ""}
+                onClick={() => {
+                  setIndex(i);
+                  setZoom(false);
+                }}
+              >
+                {t("Page", "Seite")} {i + 1}
+                <small>{p.byTeacher ? t("uploaded by you", "von Ihnen hochgeladen") : t("from student", "vom Kind")}</small>
+              </button>
+            ))}
+          </div>
+        )}
+        {page && (
+          <>
+            <div className={`scan-viewer-frame ${zoom ? "zoomed" : ""}`}>
+              {page.url ? (
+                <img
+                  src={page.url}
+                  alt={t(`${student}'s paper, page ${index + 1}`, `Arbeit von ${student}, Seite ${index + 1}`)}
+                  onClick={() => setZoom((z) => !z)}
+                />
+              ) : (
+                <div className="scan-pdf">
+                  <b>PDF</b>
+                  <span>{page.name}</span>
+                </div>
+              )}
+            </div>
+            <p className="scan-meta">
+              {page.byTeacher ? page.name : t("Photo sent by the student in the app", "Foto, das das Kind in der App gesendet hat")}
+            </p>
+          </>
+        )}
+        <div className="modal-actions">
+          {page?.url && (
+            <Button icon="eye" variant="ghost" onClick={() => setZoom((z) => !z)}>
+              {zoom ? t("Fit to window", "An Fenster anpassen") : t("Zoom in", "Vergrößern")}
+            </Button>
+          )}
+          {status.action ? (
+            <Button icon="review" onClick={onReview}>
+              {t("Review marks", "Bewertung prüfen")}
+            </Button>
+          ) : (
+            <Button icon="check" variant="secondary" onClick={onClose}>
+              {t("Close", "Schließen")}
+            </Button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}

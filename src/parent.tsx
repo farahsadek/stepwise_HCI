@@ -6,13 +6,16 @@ import { messageText, messageTime } from "./teacher";
 import { Button, Icon, Status } from "./ui";
 import {
   addThreadMessage,
+  defaultPlan,
   khadijaConcepts,
+  optionsFor,
   questionTitlesDe,
   questions,
   updateClassState,
   useClassState,
   type Lang,
   type Notifier,
+  type Text,
 } from "./store";
 
 export type ParentTab = "overview" | "results" | "progress" | "resources" | "messages" | "profile";
@@ -142,10 +145,114 @@ export function LearningAlert({ language, quiz, onHelp }: { language: Lang; quiz
 }
 
 // ---------------------------------------------------------------------------
+// D3 + D4 – learning gaps and recurring mistakes, with the evidence per quiz
+// ---------------------------------------------------------------------------
+type GapEvidence = { quiz: string; item: string; quiz4?: boolean };
+type ParentGap = {
+  id: string;
+  topic: Text;
+  mistake: Text;
+  evidence: GapEvidence[];
+  help: Text;
+};
+const khadijaGaps: ParentGap[] = [
+  {
+    id: "compare",
+    topic: { EN: "Comparing fractions", DE: "Brüche vergleichen" },
+    mistake: { EN: "Compares fractions by looking only at the bottom number", DE: "Vergleicht Brüche nur über die untere Zahl" },
+    evidence: [
+      { quiz: "Quiz 2", item: "1/2 < 1/3" },
+      { quiz: "Quiz 3", item: "3/5 > 3/4" },
+      { quiz: "Quiz 4", item: "2/3 < 3/5", quiz4: true },
+    ],
+    help: { EN: "Draw both fractions as same-size strips and ask which has more coloured.", DE: "Beide Brüche als gleich große Streifen malen und fragen, wo mehr gefärbt ist." },
+  },
+  {
+    id: "parts",
+    topic: { EN: "Equal parts", DE: "Gleiche Teile" },
+    mistake: { EN: "Shaded 2 of 4 parts instead of 3", DE: "Hat 2 von 4 Teilen statt 3 gefärbt" },
+    evidence: [{ quiz: "Quiz 4", item: "Q3 · 2/4", quiz4: true }],
+    help: { EN: "Fold paper into 4 and colour 3 parts together.", DE: "Papier in 4 Teile falten und gemeinsam 3 Teile färben." },
+  },
+  {
+    id: "working",
+    topic: { EN: "Showing working", DE: "Rechenweg zeigen" },
+    mistake: { EN: "Wrote the right answer without the calculation", DE: "Hat das richtige Ergebnis ohne Rechnung geschrieben" },
+    evidence: [{ quiz: "Quiz 4", item: "Q5 · 4 each", quiz4: true }],
+    help: { EN: "Ask her to say the sum out loud, then write it down.", DE: "Bitten Sie sie, die Rechnung laut zu sagen und dann aufzuschreiben." },
+  },
+];
+
+export function ParentGapOverview({ language, quiz, compact = false }: { language: Lang; quiz: ParentQuiz; compact?: boolean }) {
+  const t = makeT(language);
+  // Quiz 4 evidence only appears once Ms. Ashraf has shared the results.
+  const gaps = khadijaGaps
+    .map((gap) => ({ ...gap, shown: gap.evidence.filter((e) => !e.quiz4 || quiz.visible) }))
+    .filter((gap) => gap.shown.length > 0);
+  const recurring = gaps.filter((gap) => gap.shown.length >= 2);
+  const list = compact ? recurring : gaps;
+  return (
+    <article className="card parent-gaps parent-wide">
+      <p className="kicker">{t("LEARNING GAPS AND RECURRING MISTAKES", "LERNLÜCKEN UND WIEDERKEHRENDE FEHLER")}</p>
+      <h2>{t("Where Khadija needs more practice", "Wo Khadija mehr Übung braucht")}</h2>
+      {!quiz.visible && (
+        <p className="parent-gap-note">
+          {t(
+            "Based on Quiz 2 and Quiz 3. Quiz 4 is added when Ms. Ashraf shares the results.",
+            "Auf Grundlage von Quiz 2 und Quiz 3. Quiz 4 kommt dazu, wenn Frau Ashraf die Ergebnisse teilt.",
+          )}
+        </p>
+      )}
+      {list.length === 0 ? (
+        <p>{t("No repeated mistakes so far.", "Bisher keine wiederholten Fehler.")}</p>
+      ) : (
+        <ul className="gap-list">
+          {list.map((gap) => {
+            const repeated = gap.shown.length >= 2;
+            const confirmed = gap.id === "compare" && quiz.visible && quiz.flagConfirmed;
+            return (
+              <li key={gap.id} className={repeated ? "repeated" : ""}>
+                <div className="gap-head">
+                  <strong>{gap.topic[language]}</strong>
+                  <Status type={repeated ? "warn" : "neutral"}>
+                    {repeated
+                      ? t(`Repeated in ${gap.shown.length} quizzes`, `In ${gap.shown.length} Quizzen wiederholt`)
+                      : t("Seen once", "Einmal aufgetreten")}
+                  </Status>
+                  {confirmed && <Status type="good">{t("Confirmed by Ms. Ashraf", "Von Frau Ashraf bestätigt")}</Status>}
+                </div>
+                <p>
+                  <b>{repeated ? t("Recurring mistake:", "Wiederkehrender Fehler:") : t("Mistake:", "Fehler:")}</b> {gap.mistake[language]}
+                </p>
+                <div className="gap-evidence" aria-label={t("Where it happened", "Wo es vorkam")}>
+                  {gap.shown.map((e) => (
+                    <span key={e.quiz + e.item}>
+                      <small>{e.quiz}</small>
+                      <b>{e.item}</b>
+                    </span>
+                  ))}
+                </div>
+                {!compact && (
+                  <p className="gap-help">
+                    <Icon name="idea" size={16} /> {gap.help[language]}
+                  </p>
+                )}
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </article>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // D7 – practice and pop-quiz status (short card for the overview)
 // ---------------------------------------------------------------------------
 export function PracticeStatus({ language, quiz }: { language: Lang; quiz: ParentQuiz }) {
   const t = makeT(language);
+  const s = useClassState();
+  const attempts = s.popQuizzes.Khadija ?? [];
   const assigned = quiz.visible && quiz.flagConfirmed;
   return (
     <article className="card parent-practice">
@@ -163,6 +270,20 @@ export function PracticeStatus({ language, quiz }: { language: Lang; quiz: Paren
               ? t("Khadija understood the lesson.", "Khadija hat die Lektion verstanden.")
               : t("Khadija is getting there; one more try will help.", "Khadija ist auf dem Weg; ein weiterer Versuch hilft.")}
           </p>
+          {attempts.length > 0 && (
+            <ul className="parent-attempts">
+              {attempts.map((a) => {
+                const pct = Math.round((a.score / 3) * 100);
+                return (
+                  <li key={a.round}>
+                    {t("Try", "Versuch")} {a.round}: {a.score}/3 · {t("comparing fractions", "Brüche vergleichen")} {a.before}% → {pct}% (
+                    {pct - a.before >= 0 ? "+" : ""}
+                    {pct - a.before})
+                  </li>
+                );
+              })}
+            </ul>
+          )}
         </>
       ) : (
         <>
@@ -375,7 +496,8 @@ export function ParentConcepts({ language, quiz }: { language: Lang; quiz: Paren
 export function ParentResources({ language, quiz, notify }: { language: Lang; quiz: ParentQuiz; notify: (m: string) => void }) {
   const t = makeT(language);
   const s = useClassState();
-  const r = s.resources;
+  const r = s.resourcePlans.Khadija ?? defaultPlan("compare");
+  const printable = optionsFor("compare").find((o) => o.id === r.printable);
   if (!quiz.visible || !quiz.flagConfirmed)
     return (
       <article className="card parent-wide parent-empty">
@@ -410,20 +532,20 @@ export function ParentResources({ language, quiz, notify }: { language: Lang; qu
             <li>{t("Ask: which has more coloured? Why?", "Fragen Sie: Wo ist mehr gefärbt? Warum?")}</li>
             <li>{t("Praise looking at both numbers, not just the bottom one.", "Loben Sie, wenn sie auf beide Zahlen schaut, nicht nur auf die untere.")}</li>
           </ol>
-          {r.printable !== "none" && (
-            <Button
-              icon="book"
-              variant="secondary"
-              onClick={() =>
-                notify(
-                  r.printable === "game"
-                    ? t("Fraction strips game ready to print (demo only).", "Bruchstreifen-Spiel zum Drucken bereit (nur Demo).")
-                    : t("Worksheet ready to print (demo only).", "Arbeitsblatt zum Drucken bereit (nur Demo)."),
-                )
-              }
-            >
-              {r.printable === "game" ? t("Print fraction strips game", "Bruchstreifen-Spiel drucken") : t("Print worksheet", "Arbeitsblatt drucken")}
-            </Button>
+          {printable && (
+            <>
+              <p className="parent-printable">
+                <b>{printable.title[language]}</b> – {printable.detail[language]}
+                {r.printableNote && <em> · {r.printableNote}</em>}
+              </p>
+              <Button
+                icon="book"
+                variant="secondary"
+                onClick={() => notify(t(`${printable.title.EN} ready to print (demo only).`, `${printable.title.DE} zum Drucken bereit (nur Demo).`))}
+              >
+                {t("Print", "Drucken")}: {printable.title[language]}
+              </Button>
+            </>
           )}
         </article>
       </div>
